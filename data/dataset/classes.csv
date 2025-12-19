@@ -1,0 +1,29 @@
+class,grade,label,title
+PSA_10,10,PSA 10,GEM-MT
+PSA_9,9,PSA 9,MINT
+PSA_8,8,PSA 8,NM-MT
+PSA_7,7,PSA 7,NM
+PSA_6,6,PSA 6,EX-MT
+PSA_5,5,PSA 5,EX
+PSA_4,4,PSA 4,VG-EX
+PSA_3,3,PSA 3,VG
+PSA_2,2,PSA 2,GOOD
+PSA_1_5,1.5,PSA 1.5,FR
+PSA_1,1,PSA 1,PR
+PSA_2_5,2.5,PSA 2.5,Half-Point
+PSA_3_5,3.5,PSA 3.5,Half-Point
+PSA_4_5,4.5,PSA 4.5,Half-Point
+PSA_5_5,5.5,PSA 5.5,Half-Point
+PSA_6_5,6.5,PSA 6.5,Half-Point
+PSA_7_5,7.5,PSA 7.5,Half-Point
+PSA_8_5,8.5,PSA 8.5,Half-Point
+PSA_9_5,9.5,PSA 9.5,Half-Point
+PSA_N1,NA,NoGrade N1,NoGrade N1
+PSA_N2,NA,NoGrade N2,NoGrade N2
+PSA_N3,NA,NoGrade N3,NoGrade N3
+PSA_N4,NA,NoGrade N4,NoGrade N4
+PSA_N5,NA,NoGrade N5,NoGrade N5
+PSA_N6,NA,NoGrade N6,NoGrade N6
+PSA_N7,NA,NoGrade N7,NoGrade N7
+PSA_N8,NA,NoGrade N8,NoGrade N8
+PSA_N9,NA,NoGrade N9,NoGrade N9
