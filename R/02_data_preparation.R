@@ -33,11 +33,15 @@ load_and_preprocess_image <- function(image_path,
     # Resize to target size
     img <- image_resize(img, paste0(target_size[1], "x", target_size[2], "!"))
     
-    # Convert to array
-    img_array <- as.numeric(image_data(img, channels = "rgb"))
+    # Convert to array - image_data returns (channels x width x height)
+    img_data <- image_data(img, channels = "rgb")
     
-    # Reshape to (height, width, channels)
-    img_array <- array(img_array, dim = c(target_size[2], target_size[1], 3))
+    # Convert to integer then numeric for proper values
+    img_array <- as.integer(img_data)
+    
+    # Reshape from (channels x width x height) to (height x width x channels)
+    # img_data is 3 x width x height, we need height x width x 3
+    img_array <- aperm(array(img_array, dim = dim(img_data)), c(3, 2, 1))
     
     # Normalize to [0, 1] if requested
     if (normalize) {
