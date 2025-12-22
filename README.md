@@ -11,7 +11,9 @@ This repo now supports a **Tiered Model Architecture** (instead of the old PCA-c
 - **Tier 1 (Low/Mid/High)**: routes the card into a specialist head
 - **High-grade specialists**: dedicated 8/9/10 model + a PSA 9 vs 10 binary classifier
 
-## Best Reported Performance (from the tiered system run)
+## Best Performance (Tiered System)
+
+### Reported (from prior tiered-system run)
 
 | Component / Metric | Accuracy |
 |---|---:|
@@ -22,6 +24,16 @@ This repo now supports a **Tiered Model Architecture** (instead of the old PCA-c
 | High-grade specialist (8/9/10) exact | 50% |
 | PSA 9 detection (within high-grade) | 96.2% |
 | PSA 9 vs 10 binary | 73.2% |
+
+### Reproduced in this repo (fast 2-fold CV on 8,123 images; will vary by split)
+
+| Metric | Accuracy |
+|---|---:|
+| Tier 1 (Low/Mid/High) | 75.9% |
+| Exact match | 55.4% |
+| Within 1 grade | 73.0% |
+| Within 2 grades | 86.1% |
+| PSA 9 vs 10 accuracy | 58.2% |
 
 ## Quick Start
 

@@ -301,13 +301,19 @@ def extract_log_kurtosis_features(gray_224: np.ndarray) -> np.ndarray:
     v2: Kurtosis of LoG response distribution (outlier-sensitive).
     Normal-ish surfaces: lower kurtosis; scratched/dirty/glare: heavy tails.
     """
+    def safe_k(x: np.ndarray) -> float:
+        v = float(kurtosis(x, fisher=False, bias=False))
+        if not np.isfinite(v):
+            return 0.0
+        return v
+
     vals: list[float] = []
     for sigma in [1, 2, 3]:
         blurred = ndimage.gaussian_filter(gray_224, sigma)
         lap = laplace(blurred).ravel()
-        vals.append(float(kurtosis(lap, fisher=False, bias=False)))
+        vals.append(safe_k(lap))
     lap_direct = laplace(gray_224).ravel()
-    vals.append(float(kurtosis(lap_direct, fisher=False, bias=False)))
+    vals.append(safe_k(lap_direct))
     return np.array(vals)
 
 
@@ -364,6 +370,8 @@ def extract_highres_corner_features(gray_orig: np.ndarray) -> np.ndarray:
         lap_mean_abs = float(np.mean(np.abs(lap)))
         lap_std = float(np.std(lap))
         lap_k = float(kurtosis(lap.ravel(), fisher=False, bias=False))
+        if not np.isfinite(lap_k):
+            lap_k = 0.0
 
         # contour geometry
         area, perim = _largest_contour_area_perim(edges)

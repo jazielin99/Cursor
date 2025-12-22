@@ -103,18 +103,9 @@ smote_balance <- function(X_df, y_factor, target_n = NULL, k = 5, seed = 42) {
   counts <- table(y)
   if (is.null(target_n)) target_n <- max(counts)
 
-  # Prefer a proper SMOTE implementation if available.
-  if (requireNamespace("smotefamily", quietly = TRUE)) {
-    # smotefamily::SMOTE expects a data.frame/matrix and target vector
-    sm <- smotefamily::SMOTE(X = X_df, target = y, K = k, dup_size = 0)
-    out <- sm$data
-    y_out <- out$class
-    out$class <- NULL
-    return(list(X = out, y = as.factor(y_out)))
-  }
-
-  # Fallback: SMOTE-like interpolation within class (no KNN dependency).
-  cat("NOTE: Package 'smotefamily' not installed; using interpolation-based SMOTE fallback.\n")
+  # SMOTE-style interpolation within class (no KNN dependency; robust and deterministic).
+  # This produces synthetic points by linear interpolation between two samples
+  # from the same minority class until each class reaches target_n.
 
   X_mat <- as.matrix(X_df)
   colnames(X_mat) <- colnames(X_df)
