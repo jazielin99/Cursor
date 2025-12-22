@@ -12,7 +12,9 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 K <- if (length(args) >= 1) as.integer(args[[1]]) else 5
-if (is.na(K) || K < 2) stop("Usage: Rscript evaluate_tiered_cv.R [K>=2]", call. = FALSE)
+if (is.na(K) || K < 2) stop("Usage: Rscript evaluate_tiered_cv.R [K>=2] [out_prefix(optional)]", call. = FALSE)
+
+out_prefix <- if (length(args) >= 2 && nzchar(args[[2]])) args[[2]] else NULL
 
 models_dir <- "models"
 advanced_csv <- if (file.exists(file.path(models_dir, "advanced_features_v3.csv"))) {
@@ -161,6 +163,28 @@ within1 <- numeric(K)
 within2 <- numeric(K)
 acc_9v10 <- numeric(K)
 
+# --- Output files (saved under models/) ---
+dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
+ts <- format(Sys.time(), "%Y%m%d_%H%M%S")
+if (is.null(out_prefix)) {
+  out_prefix <- file.path(models_dir, paste0("tiered_cv_k", K, "_", ts))
+}
+out_csv <- paste0(out_prefix, ".csv")
+out_txt <- paste0(out_prefix, ".txt")
+
+# write header
+fold_header <- data.frame(
+  fold = integer(),
+  tier1_accuracy = numeric(),
+  exact_match = numeric(),
+  within1 = numeric(),
+  within2 = numeric(),
+  acc_9v10 = numeric(),
+  stringsAsFactors = FALSE
+)
+write.table(fold_header, file = out_csv, sep = ",", row.names = FALSE, col.names = TRUE)
+cat(paste0("Writing CV results to:\n  ", out_csv, "\n  ", out_txt, "\n\n"))
+
 for (k in 1:K) {
   cat("\n=== Fold ", k, "/", K, " ===\n", sep = "")
   train_idx <- which(folds != k)
@@ -270,15 +294,37 @@ for (k in 1:K) {
               within1[k] * 100,
               within2[k] * 100,
               ifelse(is.na(acc_9v10[k]), "NA", sprintf("%.1f%%", acc_9v10[k] * 100))))
+
+  # append fold row to CSV after each fold (so partial results are saved)
+  fold_row <- data.frame(
+    fold = k,
+    tier1_accuracy = tier1_acc[k],
+    exact_match = exact[k],
+    within1 = within1[k],
+    within2 = within2[k],
+    acc_9v10 = acc_9v10[k],
+    stringsAsFactors = FALSE
+  )
+  write.table(fold_row, file = out_csv, sep = ",", row.names = FALSE, col.names = FALSE, append = TRUE)
 }
 
 cat("\n============================\n")
 cat("CV SUMMARY\n")
 cat("============================\n")
-cat(sprintf("Tier1 accuracy: %.1f%% (SD %.1f)\n", mean(tier1_acc) * 100, sd(tier1_acc) * 100))
-cat(sprintf("Exact match:    %.1f%% (SD %.1f)\n", mean(exact) * 100, sd(exact) * 100))
-cat(sprintf("Within 1 grade: %.1f%% (SD %.1f)\n", mean(within1) * 100, sd(within1) * 100))
-cat(sprintf("Within 2 grades:%.1f%% (SD %.1f)\n", mean(within2) * 100, sd(within2) * 100))
-cat(sprintf("9 vs 10 acc:    %.1f%% (SD %.1f)\n",
-            mean(acc_9v10, na.rm = TRUE) * 100, sd(acc_9v10, na.rm = TRUE) * 100))
+summary_lines <- c(
+  "============================",
+  "CV SUMMARY",
+  "============================",
+  sprintf("K folds:         %d", K),
+  sprintf("Tier1 accuracy:  %.1f%% (SD %.1f)", mean(tier1_acc) * 100, sd(tier1_acc) * 100),
+  sprintf("Exact match:     %.1f%% (SD %.1f)", mean(exact) * 100, sd(exact) * 100),
+  sprintf("Within 1 grade:  %.1f%% (SD %.1f)", mean(within1) * 100, sd(within1) * 100),
+  sprintf("Within 2 grades: %.1f%% (SD %.1f)", mean(within2) * 100, sd(within2) * 100),
+  sprintf("9 vs 10 acc:     %.1f%% (SD %.1f)", mean(acc_9v10, na.rm = TRUE) * 100, sd(acc_9v10, na.rm = TRUE) * 100),
+  "",
+  paste0("Saved fold results: ", out_csv),
+  paste0("Saved summary:      ", out_txt)
+)
+cat(paste(summary_lines, collapse = "\n"), "\n")
+writeLines(summary_lines, con = out_txt)
 
