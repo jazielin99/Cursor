@@ -11,7 +11,7 @@ suppressPackageStartupMessages({
 })
 
 args <- commandArgs(trailingOnly = TRUE)
-K <- if (length(args) >= 1) as.integer(args[[1]]) else 3
+K <- if (length(args) >= 1) as.integer(args[[1]]) else 5
 if (is.na(K) || K < 2) stop("Usage: Rscript evaluate_tiered_cv.R [K>=2]", call. = FALSE)
 
 models_dir <- "models"

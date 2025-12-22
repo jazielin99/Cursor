@@ -94,6 +94,22 @@ suppressPackageStartupMessages({
   row
 }
 
+.build_feature_row_full <- function(image_path) {
+  adv <- if (file.exists("extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
+
+  cnn <- NULL
+  if (file.exists("extract_cnn_features_single.py")) {
+    try(cnn <- .extract_cnn(image_path), silent = TRUE)
+  }
+
+  if (!is.null(cnn)) {
+    row <- cbind(adv, cnn)
+  } else {
+    row <- adv
+  }
+  row
+}
+
 .predict_ranger_prob <- function(model, row_df) {
   pred <- predict(model, data = row_df, type = "response")$predictions
   if (!(is.matrix(pred) || is.data.frame(pred))) {
@@ -107,9 +123,10 @@ suppressPackageStartupMessages({
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
 .predict_specialist_probs <- function(tm, hg, row, tier_name) {
-  if (tier_name == "Low_1_4") return(.predict_ranger_prob(tm$low_model, row))
-  if (tier_name == "Mid_5_7") return(.predict_ranger_prob(tm$mid_model, row))
-  .predict_ranger_prob(hg$model, row)
+  fs <- tm$feature_sets
+  if (tier_name == "Low_1_4") return(.predict_ranger_prob(tm$low_model, row[, fs$low, drop = FALSE]))
+  if (tier_name == "Mid_5_7") return(.predict_ranger_prob(tm$mid_model, row[, fs$mid, drop = FALSE]))
+  .predict_ranger_prob(hg$model, row[, fs$high, drop = FALSE])
 }
 
 .as_full_prob <- function(probs, class_levels) {
@@ -123,7 +140,7 @@ suppressPackageStartupMessages({
 .consensus_grade_probs <- function(tm, hg, bin, row, tier_weight_gamma = 2) {
   class_levels <- tm$class_levels %||% sort(unique(c("PSA_1","PSA_1.5","PSA_2","PSA_3","PSA_4","PSA_5","PSA_6","PSA_7","PSA_8","PSA_9","PSA_10")))
 
-  tier_probs <- .predict_ranger_prob(tm$tier1_model, row)
+  tier_probs <- .predict_ranger_prob(tm$tier1_model, row[, tm$feature_sets$tier1, drop = FALSE])
   if (!is.null(tm$tier_levels)) {
     keep <- intersect(names(tier_probs), tm$tier_levels)
     tier_probs <- tier_probs[keep]
@@ -145,7 +162,7 @@ suppressPackageStartupMessages({
   if (all(c("PSA_9", "PSA_10") %in% names(full))) {
     mass <- full["PSA_9"] + full["PSA_10"]
     if (mass > 0) {
-      bp <- .predict_ranger_prob(bin$model, row)
+      bp <- .predict_ranger_prob(bin$model, row[, tm$feature_sets$psa_9_vs_10, drop = FALSE])
       if (all(c("PSA_9", "PSA_10") %in% names(bp))) {
         bsum <- bp["PSA_9"] + bp["PSA_10"]
         if (bsum > 0) {
@@ -153,6 +170,22 @@ suppressPackageStartupMessages({
           full["PSA_10"] <- mass * (bp["PSA_10"] / bsum)
         }
       }
+    }
+  }
+
+  # Hierarchical penalty blend (ordinal regression head)
+  if (!is.null(tm$reg_model) && !is.null(tm$reg_blend)) {
+    w <- tm$reg_blend$weight %||% 0.25
+    sigma <- tm$reg_blend$sigma %||% 0.85
+    if (is.finite(w) && w > 0) {
+      reg_pred <- predict(tm$reg_model, data = row[, tm$feature_sets$reg, drop = FALSE])$predictions[1]
+      # gaussian around reg_pred in grade-number space
+      grade_num <- function(lbl) as.numeric(gsub("PSA_", "", lbl))
+      nums <- vapply(class_levels, grade_num, numeric(1))
+      p_reg <- exp(-((nums - reg_pred) ^ 2) / (2 * sigma ^ 2))
+      p_reg <- p_reg / (sum(p_reg) + 1e-12)
+      names(p_reg) <- class_levels
+      full <- (1 - w) * full + w * p_reg
     }
   }
 
@@ -169,8 +202,14 @@ predict_grade <- function(image_path,
   hg <- .psa_models_env$high_grade_specialist
   bin <- .psa_models_env$psa_9_vs_10
 
-  selected <- tm$selected_features
-  row <- .build_feature_row(image_path, selected)
+  # Build full feature row, then subset per component using tm$feature_sets
+  row <- .build_feature_row_full(image_path)
+
+  required <- unique(unlist(tm$feature_sets))
+  missing <- setdiff(required, colnames(row))
+  if (length(missing) > 0) {
+    stop(paste0("Feature mismatch: missing ", length(missing), " required features. Example: ", paste(head(missing, 10), collapse = ", ")), call. = FALSE)
+  }
 
   consensus <- .consensus_grade_probs(tm, hg, bin, row, tier_weight_gamma = 2)
   tier_probs <- consensus$tier_probs
@@ -184,7 +223,7 @@ predict_grade <- function(image_path,
 
   upgrade_hint <- NULL
   if (grade %in% c("PSA_9", "PSA_10")) {
-    bin_probs <- .predict_ranger_prob(bin$model, row)
+    bin_probs <- .predict_ranger_prob(bin$model, row[, tm$feature_sets$psa_9_vs_10, drop = FALSE])
     bin_grade <- names(bin_probs)[which.max(bin_probs)]
     bin_conf <- max(bin_probs)
     if (bin_grade == "PSA_10" && !is.na(bin_conf) && bin_conf >= psa10_upgrade_threshold && bin_conf < 0.70) {
