@@ -1,0 +1,188 @@
+# ============================================
+# PSA Grade Prediction (Tiered System v2)
+# - Auto-loads tiered + specialists
+# - Uses Python for CNN + advanced feature extraction
+# - Batch prediction support
+# ============================================
+
+suppressPackageStartupMessages({
+  library(ranger)
+})
+
+.psa_models_env <- new.env(parent = emptyenv())
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+.require_file <- function(path) {
+  if (!file.exists(path)) stop(paste0("Missing required file: ", path), call. = FALSE)
+}
+
+.run_python <- function(args) {
+  res <- system2("python3", args = args, stdout = TRUE, stderr = TRUE)
+  status <- attr(res, "status")
+  if (!is.null(status) && status != 0) {
+    stop(paste(res, collapse = "\n"), call. = FALSE)
+  }
+  invisible(res)
+}
+
+.load_models <- function(models_dir = "models") {
+  if (exists("tiered_model", envir = .psa_models_env, inherits = FALSE)) return(invisible(TRUE))
+
+  tiered_path <- file.path(models_dir, "tiered_model.rds")
+  high_path <- file.path(models_dir, "high_grade_specialist.rds")
+  bin_path <- file.path(models_dir, "psa_9_vs_10.rds")
+
+  .require_file(tiered_path)
+  .require_file(high_path)
+  .require_file(bin_path)
+
+  .psa_models_env$tiered_model <- readRDS(tiered_path)
+  .psa_models_env$high_grade_specialist <- readRDS(high_path)
+  .psa_models_env$psa_9_vs_10 <- readRDS(bin_path)
+
+  invisible(TRUE)
+}
+
+.extract_advanced_v2 <- function(image_path, tmp_dir = tempdir(), script = "extract_advanced_features_v2.py") {
+  adv_out <- file.path(tmp_dir, "adv_v2_single.csv")
+  .run_python(c(script, "--image", image_path, "--output-csv", adv_out))
+  adv <- read.csv(adv_out, check.names = FALSE)
+  adv$path <- NULL
+  adv
+}
+
+.extract_cnn <- function(image_path, tmp_dir = tempdir(), script = "extract_cnn_features_single.py") {
+  cnn_out <- file.path(tmp_dir, "cnn_single.csv")
+  .run_python(c(script, "--image", image_path, "--output-csv", cnn_out))
+  cnn <- read.csv(cnn_out, check.names = FALSE)
+  cnn$path <- NULL
+  cnn
+}
+
+.build_feature_row <- function(image_path, selected_features) {
+  adv <- .extract_advanced_v2(image_path)
+
+  # Try CNN; allow tiered model to be trained without it
+  cnn <- NULL
+  if (file.exists("extract_cnn_features_single.py")) {
+    try(cnn <- .extract_cnn(image_path), silent = TRUE)
+  }
+
+  if (!is.null(cnn)) {
+    row <- cbind(adv, cnn)
+  } else {
+    row <- adv
+  }
+
+  missing <- setdiff(selected_features, colnames(row))
+  if (length(missing) > 0) {
+    stop(paste0(
+      "Feature mismatch: missing ", length(missing), " required features.\n",
+      "Common cause: tiered model trained with CNN features, but CNN extraction isn't available at prediction time.\n",
+      "Missing examples: ", paste(head(missing, 10), collapse = ", ")
+    ), call. = FALSE)
+  }
+
+  row <- row[, selected_features, drop = FALSE]
+  row
+}
+
+.predict_ranger_prob <- function(model, row_df) {
+  pred <- predict(model, data = row_df, type = "response")$predictions
+  if (!(is.matrix(pred) || is.data.frame(pred))) {
+    stop("Model did not return class probabilities; ensure ranger was trained with probability=TRUE.", call. = FALSE)
+  }
+  probs <- as.numeric(pred[1, ])
+  names(probs) <- colnames(pred)
+  probs
+}
+
+predict_grade <- function(image_path,
+                          models_dir = "models",
+                          psa10_upgrade_threshold = 0.55) {
+  .load_models(models_dir)
+
+  tm <- .psa_models_env$tiered_model
+  hg <- .psa_models_env$high_grade_specialist
+  bin <- .psa_models_env$psa_9_vs_10
+
+  selected <- tm$selected_features
+  row <- .build_feature_row(image_path, selected)
+
+  # Tier 1
+  tier_probs <- .predict_ranger_prob(tm$tier1_model, row)
+  tier <- names(tier_probs)[which.max(tier_probs)]
+  tier_conf <- max(tier_probs)
+
+  # Tier 2
+  if (tier == "Low_1_4") {
+    grade_probs <- .predict_ranger_prob(tm$low_model, row)
+  } else if (tier == "Mid_5_7") {
+    grade_probs <- .predict_ranger_prob(tm$mid_model, row)
+  } else {
+    # High tier: use dedicated specialist
+    grade_probs <- .predict_ranger_prob(hg$model, row)
+  }
+
+  grade <- names(grade_probs)[which.max(grade_probs)]
+  grade_conf <- max(grade_probs)
+
+  # 9 vs 10 breaker (only when we are in the high band)
+  upgrade_hint <- NULL
+  if (tier == "High_8_10") {
+    if (grade %in% c("PSA_9", "PSA_10")) {
+      bin_probs <- .predict_ranger_prob(bin$model, row)
+      bin_grade <- names(bin_probs)[which.max(bin_probs)]
+      bin_conf <- max(bin_probs)
+
+      # Use binary decision if it is confident enough; otherwise keep multi-class
+      if (!is.na(bin_conf) && bin_conf >= 0.51) {
+        grade <- bin_grade
+        grade_conf <- bin_conf
+      }
+
+      # Optional "Potential 10 upgrade" hint
+      if (bin_grade == "PSA_10" && !is.na(bin_conf) && bin_conf >= psa10_upgrade_threshold && bin_conf < 0.70) {
+        upgrade_hint <- "PSA 9 (Potential 10 Upgrade)"
+      }
+    }
+  }
+
+  out <- list(
+    image = image_path,
+    tier = tier,
+    tier_confidence = tier_conf,
+    grade = grade,
+    grade_confidence = grade_conf,
+    upgrade_hint = upgrade_hint,
+    tier_probabilities = tier_probs,
+    grade_probabilities = grade_probs
+  )
+
+  return(out)
+}
+
+predict_batch <- function(folder,
+                          models_dir = "models",
+                          pattern = "\\.(jpg|jpeg|png|webp)$",
+                          recursive = FALSE) {
+  files <- list.files(folder, pattern = pattern, full.names = TRUE, recursive = recursive, ignore.case = TRUE)
+  if (length(files) == 0) stop(paste0("No images found in: ", folder), call. = FALSE)
+
+  results <- lapply(files, function(f) {
+    r <- predict_grade(f, models_dir = models_dir)
+    data.frame(
+      image = r$image,
+      tier = r$tier,
+      tier_confidence = r$tier_confidence,
+      grade = r$grade,
+      grade_confidence = r$grade_confidence,
+      upgrade_hint = ifelse(is.null(r$upgrade_hint), "", r$upgrade_hint),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, results)
+}
+

@@ -9,6 +9,16 @@ models/cnn_features_resnet50.csv
 models/cnn_features_resnet50.pkl
 models/features_cache.rds
 
+# Tiered system artifacts (can be large)
+models/advanced_features_v2.csv
+models/advanced_features_v2.pkl
+models/cnn_features_mobilenetv2.csv
+models/cnn_features_mobilenetv2.pkl
+models/tiered_model.rds
+models/high_grade_specialist.rds
+models/psa_9_vs_10.rds
+models/_single_advanced_features_v2.csv
+
 # Python cache
 __pycache__/
 *.pyc
