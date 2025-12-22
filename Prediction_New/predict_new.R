@@ -42,7 +42,7 @@ suppressPackageStartupMessages({
   invisible(TRUE)
 }
 
-.extract_advanced_v2 <- function(image_path, tmp_dir = tempdir(), script = "extract_advanced_features_v2.py") {
+.extract_advanced_v2 <- function(image_path, tmp_dir = tempdir(), script = "scripts/feature_extraction/extract_advanced_features_v2.py") {
   adv_out <- file.path(tmp_dir, "adv_v2_single.csv")
   .run_python(c(script, "--image", image_path, "--output-csv", adv_out))
   adv <- read.csv(adv_out, check.names = FALSE)
@@ -50,7 +50,7 @@ suppressPackageStartupMessages({
   adv
 }
 
-.extract_advanced_v3 <- function(image_path, tmp_dir = tempdir(), script = "extract_advanced_features_v3.py") {
+.extract_advanced_v3 <- function(image_path, tmp_dir = tempdir(), script = "scripts/feature_extraction/extract_advanced_features_v3.py") {
   adv_out <- file.path(tmp_dir, "adv_v3_single.csv")
   .run_python(c(script, "--image", image_path, "--output-csv", adv_out))
   adv <- read.csv(adv_out, check.names = FALSE)
@@ -58,7 +58,7 @@ suppressPackageStartupMessages({
   adv
 }
 
-.extract_cnn <- function(image_path, tmp_dir = tempdir(), script = "extract_cnn_features_single.py") {
+.extract_cnn <- function(image_path, tmp_dir = tempdir(), script = "scripts/feature_extraction/extract_cnn_features_single.py") {
   cnn_out <- file.path(tmp_dir, "cnn_single.csv")
   .run_python(c(script, "--image", image_path, "--output-csv", cnn_out))
   cnn <- read.csv(cnn_out, check.names = FALSE)
@@ -67,11 +67,11 @@ suppressPackageStartupMessages({
 }
 
 .build_feature_row <- function(image_path, selected_features) {
-  adv <- if (file.exists("extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
+  adv <- if (file.exists("scripts/feature_extraction/extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
 
   # Try CNN; allow tiered model to be trained without it
   cnn <- NULL
-  if (file.exists("extract_cnn_features_single.py")) {
+  if (file.exists("scripts/feature_extraction/extract_cnn_features_single.py")) {
     try(cnn <- .extract_cnn(image_path), silent = TRUE)
   }
 
@@ -95,10 +95,10 @@ suppressPackageStartupMessages({
 }
 
 .build_feature_row_full <- function(image_path) {
-  adv <- if (file.exists("extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
+  adv <- if (file.exists("scripts/feature_extraction/extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
 
   cnn <- NULL
-  if (file.exists("extract_cnn_features_single.py")) {
+  if (file.exists("scripts/feature_extraction/extract_cnn_features_single.py")) {
     try(cnn <- .extract_cnn(image_path), silent = TRUE)
   }
 
