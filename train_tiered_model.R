@@ -87,6 +87,7 @@ map_tier <- function(lbl_num) {
 # --- Prepare matrix ---
 df$grade_num <- grade_to_num(df$label)
 df$tier <- factor(vapply(df$grade_num, map_tier, character(1)), levels = c("Low_1_4", "Mid_5_7", "High_8_10"))
+df$label <- factor(df$label)
 
 feature_cols <- setdiff(colnames(df), c("label", "grade_num", "tier", "path"))
 X <- df[, feature_cols, drop = FALSE]
@@ -116,8 +117,10 @@ smote_balance <- function(X_df, y_factor, target_n = NULL, k = 5, seed = 42) {
   cat("NOTE: Package 'smotefamily' not installed; using interpolation-based SMOTE fallback.\n")
 
   X_mat <- as.matrix(X_df)
+  colnames(X_mat) <- colnames(X_df)
   X_out <- X_mat
-  y_out <- y
+  # IMPORTANT: avoid factor -> integer coercion when concatenating
+  y_out <- as.character(y)
 
   for (cls in names(counts)) {
     idx <- which(y == cls)
@@ -140,11 +143,14 @@ smote_balance <- function(X_df, y_factor, target_n = NULL, k = 5, seed = 42) {
     y_out <- c(y_out, rep(cls, need))
   }
 
-  return(list(X = as.data.frame(X_out), y = as.factor(y_out)))
+  X_out <- as.data.frame(X_out)
+  colnames(X_out) <- colnames(X_df)
+  return(list(X = X_out, y = factor(y_out, levels = levels(y))))
 }
 
 # --- Feature importance selection (top 365) ---
 select_top_features <- function(X_df, y_factor, top_n = 365, critical_prefixes = c("centering_", "corner_", "hires_corner_", "corner_circularity_", "log_")) {
+  y_factor <- as.factor(y_factor)
   # Train a RF for importance on the full dataset.
   # (If you want stricter validation, compute importance inside each CV fold.)
   rf <- ranger(

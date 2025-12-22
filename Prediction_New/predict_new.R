@@ -186,3 +186,83 @@ predict_batch <- function(folder,
   do.call(rbind, results)
 }
 
+# --------------------------------------------
+# Real-world sanity checks (recommended)
+# --------------------------------------------
+
+rotation_invariance_test <- function(image_path,
+                                     degrees = 5,
+                                     models_dir = "models") {
+  tmp <- tempfile(fileext = ".jpg")
+  cmd <- paste(
+    "python3 - <<'PY'",
+    "import cv2",
+    "import numpy as np",
+    "from pathlib import Path",
+    sprintf("src = Path(%s)", dQuote(normalizePath(image_path))),
+    sprintf("dst = Path(%s)", dQuote(tmp)),
+    "img = cv2.imread(str(src))",
+    "h, w = img.shape[:2]",
+    "M = cv2.getRotationMatrix2D((w/2, h/2), float(",
+    degrees,
+    "), 1.0)",
+    "rot = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)",
+    "cv2.imwrite(str(dst), rot)",
+    "print(dst)",
+    "PY",
+    sep = "\n"
+  )
+  system(cmd, ignore.stdout = TRUE, ignore.stderr = TRUE)
+
+  base <- predict_grade(image_path, models_dir = models_dir)
+  rot <- predict_grade(tmp, models_dir = models_dir)
+  list(
+    base = base,
+    rotated = rot,
+    degrees = degrees,
+    rotated_path = tmp
+  )
+}
+
+lighting_check_test <- function(image_path,
+                                models_dir = "models") {
+  warm_path <- tempfile(fileext = ".jpg")
+  white_path <- tempfile(fileext = ".jpg")
+
+  cmd <- paste(
+    "python3 - <<'PY'",
+    "import cv2",
+    "import numpy as np",
+    "from pathlib import Path",
+    sprintf("src = Path(%s)", dQuote(normalizePath(image_path))),
+    sprintf("warm_path = Path(%s)", dQuote(warm_path)),
+    sprintf("white_path = Path(%s)", dQuote(white_path)),
+    "img = cv2.imread(str(src))",
+    "warm = img.astype(np.float32)",
+    "warm[:,:,2] *= 1.10",
+    "warm[:,:,0] *= 0.90",
+    "warm = np.clip(warm, 0, 255).astype(np.uint8)",
+    "cv2.imwrite(str(warm_path), warm)",
+    "white = img.astype(np.float32)",
+    "white[:,:,0] *= 1.08",
+    "white[:,:,2] *= 0.95",
+    "white = np.clip(white, 0, 255).astype(np.uint8)",
+    "cv2.imwrite(str(white_path), white)",
+    "print(warm_path)",
+    "print(white_path)",
+    "PY",
+    sep = "\n"
+  )
+  system(cmd, ignore.stdout = TRUE, ignore.stderr = TRUE)
+
+  warm <- predict_grade(warm_path, models_dir = models_dir)
+  white <- predict_grade(white_path, models_dir = models_dir)
+
+  list(
+    warm = warm,
+    white = white,
+    warm_path = warm_path,
+    white_path = white_path
+  )
+}
+
