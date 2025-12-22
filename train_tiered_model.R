@@ -81,6 +81,10 @@ if (!is.na(cnn_csv) && nzchar(cnn_csv)) {
   df <- adv
 }
 
+# Ensure rownames are stable for X slicing
+df$.row_id <- seq_len(nrow(df))
+rownames(df) <- df$.row_id
+
 # --- Label utilities ---
 grade_to_num <- function(lbl) {
   as.numeric(gsub("PSA_", "", as.character(lbl)))
@@ -101,7 +105,7 @@ df$grade_num <- grade_to_num(df$label)
 df$tier <- factor(vapply(df$grade_num, map_tier, character(1)), levels = c("Low_1_4", "Mid_5_7", "High_8_10"))
 df$label <- factor(df$label)
 
-feature_cols <- setdiff(colnames(df), c("label", "grade_num", "tier", "path"))
+feature_cols <- setdiff(colnames(df), c("label", "grade_num", "tier", "path", ".row_id"))
 X <- df[, feature_cols, drop = FALSE]
 
 cat("\nDataset:", nrow(df), "samples\n")
@@ -200,14 +204,58 @@ select_top_features <- function(
   return(list(selected = selected, importance = imp))
 }
 
-cat("Computing feature importance and selecting top 365 (critical prefixes preserved)...\n")
-sel <- select_top_features(X, df$label, top_n = 365)
-selected_features <- sel$selected
-cat("Selected features:", length(selected_features), "\n\n")
+# --- Tier-specific feature selection (dynamic hierarchy) ---
+cat("Selecting tier-specific feature sets...\n")
+
+# Tier 1 selection (tier labels)
+sel_tier1 <- select_top_features(
+  X,
+  df$tier,
+  top_n = 365,
+  critical_prefixes = c("centering_", "corner_", "hires_corner_", "corner_circularity_", "log_", "lab_", "patch_")
+)
+features_tier1 <- sel_tier1$selected
+
+low_df <- df[df$grade_num <= 4, , drop = FALSE]
+mid_df <- df[df$grade_num >= 5 & df$grade_num <= 7, , drop = FALSE]
+high_df <- df[df$grade_num >= 8 & df$grade_num <= 10, , drop = FALSE]
+
+X_low <- X[rownames(low_df), , drop = FALSE]
+X_mid <- X[rownames(mid_df), , drop = FALSE]
+X_high <- X[rownames(high_df), , drop = FALSE]
+
+sel_low <- select_top_features(
+  X_low,
+  low_df$label,
+  top_n = 365,
+  critical_prefixes = c("log_", "texture_", "hog_", "lbp_", "patch_", "lab_")
+)
+features_low <- sel_low$selected
+
+sel_mid <- select_top_features(
+  X_mid,
+  mid_df$label,
+  top_n = 365,
+  critical_prefixes = c("centering_", "corner_", "hog_", "log_", "lab_", "patch_")
+)
+features_mid <- sel_mid$selected
+
+sel_high <- select_top_features(
+  X_high,
+  high_df$label,
+  top_n = 365,
+  critical_prefixes = c("centering_", "corner_", "hires_corner_", "corner_circularity_", "patch_", "lab_", "log_kurtosis_", "log_")
+)
+features_high <- sel_high$selected
+
+cat("Tier 1 features:", length(features_tier1), "\n")
+cat("Low specialist features:", length(features_low), "\n")
+cat("Mid specialist features:", length(features_mid), "\n")
+cat("High specialist features:", length(features_high), "\n\n")
 
 # --- Train Tier 1 (Low/Mid/High) ---
 cat("Training Tier 1 model (Low/Mid/High) with class balancing...\n")
-bal1 <- smote_balance(X[, selected_features, drop = FALSE], df$tier)
+bal1 <- smote_balance(X[, features_tier1, drop = FALSE], df$tier)
 tier1_model <- ranger(
   dependent.variable.name = "y",
   data = cbind(bal1$X, y = bal1$y),
@@ -219,7 +267,8 @@ tier1_model <- ranger(
 
 # --- Train Tier 2 specialists (exact grades per tier) ---
 train_specialist <- function(sub_df, feature_names) {
-  Xs <- sub_df[, feature_names, drop = FALSE]
+  # sub_df is a slice of df; use rownames to index X
+  Xs <- X[rownames(sub_df), feature_names, drop = FALSE]
   ys <- factor(sub_df$label)
   bal <- smote_balance(Xs, ys)
   ranger(
@@ -231,23 +280,19 @@ train_specialist <- function(sub_df, feature_names) {
   )
 }
 
-low_df <- df[df$grade_num <= 4, , drop = FALSE]
-mid_df <- df[df$grade_num >= 5 & df$grade_num <= 7, , drop = FALSE]
-high_df <- df[df$grade_num >= 8 & df$grade_num <= 10, , drop = FALSE]
-
 cat("Training Low specialist (PSA 1-4)...\n")
-low_model <- train_specialist(low_df, selected_features)
+low_model <- train_specialist(low_df, features_low)
 
 cat("Training Mid specialist (PSA 5-7)...\n")
-mid_model <- train_specialist(mid_df, selected_features)
+mid_model <- train_specialist(mid_df, features_mid)
 
 cat("Training High specialist (PSA 8-10)...\n")
-high_model <- train_specialist(high_df, selected_features)
+high_model <- train_specialist(high_df, features_high)
 
 # Save a dedicated high-grade specialist artifact (requested)
 high_grade_specialist <- list(
   model = high_model,
-  selected_features = selected_features,
+  selected_features = features_high,
   range = c("PSA_8", "PSA_9", "PSA_10")
 )
 
@@ -255,7 +300,17 @@ high_grade_specialist <- list(
 cat("Training PSA 9 vs PSA 10 binary classifier...\n")
 bin_df <- df[df$grade_num %in% c(9, 10), , drop = FALSE]
 bin_df$bin_label <- factor(ifelse(bin_df$grade_num == 10, "PSA_10", "PSA_9"), levels = c("PSA_9", "PSA_10"))
-bal_bin <- smote_balance(bin_df[, selected_features, drop = FALSE], bin_df$bin_label)
+
+X_bin <- X[rownames(bin_df), , drop = FALSE]
+sel_9v10 <- select_top_features(
+  X_bin,
+  bin_df$bin_label,
+  top_n = 250,
+  critical_prefixes = c("centering_", "corner_", "hires_corner_", "corner_circularity_", "patch_", "lab_", "log_kurtosis_", "log_")
+)
+features_9v10 <- sel_9v10$selected
+
+bal_bin <- smote_balance(X_bin[, features_9v10, drop = FALSE], bin_df$bin_label)
 psa_9_vs_10 <- ranger(
   dependent.variable.name = "y",
   data = cbind(bal_bin$X, y = bal_bin$y),
@@ -264,18 +319,38 @@ psa_9_vs_10 <- ranger(
   classification = TRUE
 )
 
+# --- Hierarchical penalty approximation: ordinal regression head (numeric grade) ---
+cat("Training ordinal regression head (squared-error penalty for far misses)...\n")
+X_reg <- X[, features_tier1, drop = FALSE]
+reg_model <- ranger(
+  dependent.variable.name = "y",
+  data = cbind(X_reg, y = df$grade_num),
+  num.trees = 700,
+  classification = FALSE
+)
+
 # --- Save artifacts ---
 dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
 
 tiered_model <- list(
-  version = "tiered_v1",
-  selected_features = selected_features,
+  version = "tiered_v2_expert",
+  # feature sets used by each component
+  feature_sets = list(
+    tier1 = features_tier1,
+    low = features_low,
+    mid = features_mid,
+    high = features_high,
+    psa_9_vs_10 = features_9v10,
+    reg = features_tier1
+  ),
   class_levels = levels(df$label),
   tier_levels = levels(df$tier),
   tier1_model = tier1_model,
   low_model = low_model,
   mid_model = mid_model,
   high_model = high_model,
+  reg_model = reg_model,
+  reg_blend = list(weight = 0.25, sigma = 0.85),
   feature_sources = list(
     advanced = basename(advanced_csv),
     cnn = if (!is.na(cnn_csv) && nzchar(cnn_csv)) basename(cnn_csv) else NA
@@ -284,7 +359,7 @@ tiered_model <- list(
 
 saveRDS(tiered_model, file.path(models_dir, "tiered_model.rds"))
 saveRDS(high_grade_specialist, file.path(models_dir, "high_grade_specialist.rds"))
-saveRDS(list(model = psa_9_vs_10, selected_features = selected_features), file.path(models_dir, "psa_9_vs_10.rds"))
+saveRDS(list(model = psa_9_vs_10, selected_features = features_9v10), file.path(models_dir, "psa_9_vs_10.rds"))
 
 cat("\nSaved models:\n")
 cat("  models/tiered_model.rds\n")
