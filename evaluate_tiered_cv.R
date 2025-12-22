@@ -15,10 +15,14 @@ K <- if (length(args) >= 1) as.integer(args[[1]]) else 3
 if (is.na(K) || K < 2) stop("Usage: Rscript evaluate_tiered_cv.R [K>=2]", call. = FALSE)
 
 models_dir <- "models"
-advanced_csv <- file.path(models_dir, "advanced_features_v2.csv")
+advanced_csv <- if (file.exists(file.path(models_dir, "advanced_features_v3.csv"))) {
+  file.path(models_dir, "advanced_features_v3.csv")
+} else {
+  file.path(models_dir, "advanced_features_v2.csv")
+}
 cnn_csv <- file.path(models_dir, "cnn_features_mobilenetv2.csv")
 
-if (!file.exists(advanced_csv)) stop("Missing models/advanced_features_v2.csv (run extractor).", call. = FALSE)
+if (!file.exists(advanced_csv)) stop("Missing advanced features CSV (run extractor).", call. = FALSE)
 if (!file.exists(cnn_csv)) stop("Missing models/cnn_features_mobilenetv2.csv (run extractor).", call. = FALSE)
 
 cat("Loading features...\n")
@@ -111,6 +115,42 @@ predict_probs <- function(model, row_df) {
   probs
 }
 
+as_full_prob <- function(probs, class_levels) {
+  out <- rep(0, length(class_levels))
+  names(out) <- class_levels
+  common <- intersect(names(probs), class_levels)
+  out[common] <- probs[common]
+  out
+}
+
+consensus_probs <- function(tier_probs, probs_low, probs_mid, probs_high, probs_9v10, class_levels, tier_weight_gamma = 2) {
+  # tier_probs: named Low_1_4/Mid_5_7/High_8_10
+  tier_probs <- tier_probs^tier_weight_gamma
+  tier_probs <- tier_probs / (sum(tier_probs) + 1e-12)
+
+  full <- rep(0, length(class_levels))
+  names(full) <- class_levels
+
+  full <- full + tier_probs["Low_1_4"] * as_full_prob(probs_low, class_levels)
+  full <- full + tier_probs["Mid_5_7"] * as_full_prob(probs_mid, class_levels)
+  full <- full + tier_probs["High_8_10"] * as_full_prob(probs_high, class_levels)
+
+  # Apply 9v10 redistribution
+  if (all(c("PSA_9", "PSA_10") %in% class_levels) && all(c("PSA_9", "PSA_10") %in% names(probs_9v10))) {
+    mass <- full["PSA_9"] + full["PSA_10"]
+    if (mass > 0) {
+      bsum <- probs_9v10["PSA_9"] + probs_9v10["PSA_10"]
+      if (bsum > 0) {
+        full["PSA_9"] <- mass * (probs_9v10["PSA_9"] / bsum)
+        full["PSA_10"] <- mass * (probs_9v10["PSA_10"] / bsum)
+      }
+    }
+  }
+
+  full <- full / (sum(full) + 1e-12)
+  full
+}
+
 set.seed(42)
 n <- nrow(df)
 folds <- sample(rep(1:K, length.out = n))
@@ -181,9 +221,11 @@ for (k in 1:K) {
     classification = TRUE
   )
 
-  # Predict test fold
+  # Predict test fold (consensus soft voting)
   y_pred <- character(length(test_idx))
   tier_pred <- character(length(test_idx))
+
+  class_levels <- levels(df$label)
 
   for (i in seq_along(test_idx)) {
     row <- X_test[i, selected, drop = FALSE]
@@ -191,17 +233,17 @@ for (k in 1:K) {
     tname <- names(tp)[which.max(tp)]
     tier_pred[i] <- tname
 
-    if (tname == "Low_1_4") gp <- predict_probs(m_low, row)
-    else if (tname == "Mid_5_7") gp <- predict_probs(m_mid, row)
-    else gp <- predict_probs(m_high, row)
+    gp_low <- predict_probs(m_low, row)
+    gp_mid <- predict_probs(m_mid, row)
+    gp_high <- predict_probs(m_high, row)
+    bp <- predict_probs(m_9v10, row)
 
-    gname <- names(gp)[which.max(gp)]
+    # Ensure we have all three tier names present (missing ones get 0)
+    tier_full <- c(Low_1_4 = 0, Mid_5_7 = 0, High_8_10 = 0)
+    tier_full[names(tp)] <- tp
 
-    # apply 9v10 when high and candidate is 9/10
-    if (tname == "High_8_10" && gname %in% c("PSA_9", "PSA_10")) {
-      bp <- predict_probs(m_9v10, row)
-      gname <- names(bp)[which.max(bp)]
-    }
+    full <- consensus_probs(tier_full, gp_low, gp_mid, gp_high, bp, class_levels, tier_weight_gamma = 2)
+    gname <- names(full)[which.max(full)]
 
     y_pred[i] <- gname
   }

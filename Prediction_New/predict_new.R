@@ -11,8 +11,6 @@ suppressPackageStartupMessages({
 
 .psa_models_env <- new.env(parent = emptyenv())
 
-`%||%` <- function(a, b) if (!is.null(a)) a else b
-
 .require_file <- function(path) {
   if (!file.exists(path)) stop(paste0("Missing required file: ", path), call. = FALSE)
 }
@@ -52,6 +50,14 @@ suppressPackageStartupMessages({
   adv
 }
 
+.extract_advanced_v3 <- function(image_path, tmp_dir = tempdir(), script = "extract_advanced_features_v3.py") {
+  adv_out <- file.path(tmp_dir, "adv_v3_single.csv")
+  .run_python(c(script, "--image", image_path, "--output-csv", adv_out))
+  adv <- read.csv(adv_out, check.names = FALSE)
+  adv$path <- NULL
+  adv
+}
+
 .extract_cnn <- function(image_path, tmp_dir = tempdir(), script = "extract_cnn_features_single.py") {
   cnn_out <- file.path(tmp_dir, "cnn_single.csv")
   .run_python(c(script, "--image", image_path, "--output-csv", cnn_out))
@@ -61,7 +67,7 @@ suppressPackageStartupMessages({
 }
 
 .build_feature_row <- function(image_path, selected_features) {
-  adv <- .extract_advanced_v2(image_path)
+  adv <- if (file.exists("extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
 
   # Try CNN; allow tiered model to be trained without it
   cnn <- NULL
@@ -98,6 +104,62 @@ suppressPackageStartupMessages({
   probs
 }
 
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+.predict_specialist_probs <- function(tm, hg, row, tier_name) {
+  if (tier_name == "Low_1_4") return(.predict_ranger_prob(tm$low_model, row))
+  if (tier_name == "Mid_5_7") return(.predict_ranger_prob(tm$mid_model, row))
+  .predict_ranger_prob(hg$model, row)
+}
+
+.as_full_prob <- function(probs, class_levels) {
+  out <- rep(0, length(class_levels))
+  names(out) <- class_levels
+  common <- intersect(names(probs), class_levels)
+  out[common] <- probs[common]
+  out
+}
+
+.consensus_grade_probs <- function(tm, hg, bin, row, tier_weight_gamma = 2) {
+  class_levels <- tm$class_levels %||% sort(unique(c("PSA_1","PSA_1.5","PSA_2","PSA_3","PSA_4","PSA_5","PSA_6","PSA_7","PSA_8","PSA_9","PSA_10")))
+
+  tier_probs <- .predict_ranger_prob(tm$tier1_model, row)
+  if (!is.null(tm$tier_levels)) {
+    keep <- intersect(names(tier_probs), tm$tier_levels)
+    tier_probs <- tier_probs[keep]
+  }
+  # Sharpen tier weights to reflect Tier-1 confidence
+  tier_probs <- tier_probs^tier_weight_gamma
+  tier_probs <- tier_probs / (sum(tier_probs) + 1e-12)
+
+  full <- rep(0, length(class_levels))
+  names(full) <- class_levels
+
+  for (tname in names(tier_probs)) {
+    sp <- .predict_specialist_probs(tm, hg, row, tname)
+    sp_full <- .as_full_prob(sp, class_levels)
+    full <- full + tier_probs[tname] * sp_full
+  }
+
+  # 9 vs 10 reweighting
+  if (all(c("PSA_9", "PSA_10") %in% names(full))) {
+    mass <- full["PSA_9"] + full["PSA_10"]
+    if (mass > 0) {
+      bp <- .predict_ranger_prob(bin$model, row)
+      if (all(c("PSA_9", "PSA_10") %in% names(bp))) {
+        bsum <- bp["PSA_9"] + bp["PSA_10"]
+        if (bsum > 0) {
+          full["PSA_9"] <- mass * (bp["PSA_9"] / bsum)
+          full["PSA_10"] <- mass * (bp["PSA_10"] / bsum)
+        }
+      }
+    }
+  }
+
+  full <- full / (sum(full) + 1e-12)
+  list(tier_probs = tier_probs, grade_probs = full)
+}
+
 predict_grade <- function(image_path,
                           models_dir = "models",
                           psa10_upgrade_threshold = 0.55) {
@@ -110,42 +172,23 @@ predict_grade <- function(image_path,
   selected <- tm$selected_features
   row <- .build_feature_row(image_path, selected)
 
-  # Tier 1
-  tier_probs <- .predict_ranger_prob(tm$tier1_model, row)
+  consensus <- .consensus_grade_probs(tm, hg, bin, row, tier_weight_gamma = 2)
+  tier_probs <- consensus$tier_probs
+  grade_probs <- consensus$grade_probs
+
   tier <- names(tier_probs)[which.max(tier_probs)]
   tier_conf <- max(tier_probs)
-
-  # Tier 2
-  if (tier == "Low_1_4") {
-    grade_probs <- .predict_ranger_prob(tm$low_model, row)
-  } else if (tier == "Mid_5_7") {
-    grade_probs <- .predict_ranger_prob(tm$mid_model, row)
-  } else {
-    # High tier: use dedicated specialist
-    grade_probs <- .predict_ranger_prob(hg$model, row)
-  }
 
   grade <- names(grade_probs)[which.max(grade_probs)]
   grade_conf <- max(grade_probs)
 
-  # 9 vs 10 breaker (only when we are in the high band)
   upgrade_hint <- NULL
-  if (tier == "High_8_10") {
-    if (grade %in% c("PSA_9", "PSA_10")) {
-      bin_probs <- .predict_ranger_prob(bin$model, row)
-      bin_grade <- names(bin_probs)[which.max(bin_probs)]
-      bin_conf <- max(bin_probs)
-
-      # Use binary decision if it is confident enough; otherwise keep multi-class
-      if (!is.na(bin_conf) && bin_conf >= 0.51) {
-        grade <- bin_grade
-        grade_conf <- bin_conf
-      }
-
-      # Optional "Potential 10 upgrade" hint
-      if (bin_grade == "PSA_10" && !is.na(bin_conf) && bin_conf >= psa10_upgrade_threshold && bin_conf < 0.70) {
-        upgrade_hint <- "PSA 9 (Potential 10 Upgrade)"
-      }
+  if (grade %in% c("PSA_9", "PSA_10")) {
+    bin_probs <- .predict_ranger_prob(bin$model, row)
+    bin_grade <- names(bin_probs)[which.max(bin_probs)]
+    bin_conf <- max(bin_probs)
+    if (bin_grade == "PSA_10" && !is.na(bin_conf) && bin_conf >= psa10_upgrade_threshold && bin_conf < 0.70) {
+      upgrade_hint <- "PSA 9 (Potential 10 Upgrade)"
     }
   }
 

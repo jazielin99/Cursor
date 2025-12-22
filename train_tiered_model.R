@@ -15,7 +15,12 @@ suppressPackageStartupMessages({
 })
 
 models_dir <- "models"
-advanced_csv <- file.path(models_dir, "advanced_features_v2.csv")
+# Prefer v3 if present; fallback to v2
+advanced_csv_candidates <- c(
+  file.path(models_dir, "advanced_features_v3.csv"),
+  file.path(models_dir, "advanced_features_v2.csv")
+)
+advanced_csv <- advanced_csv_candidates[file.exists(advanced_csv_candidates)][1]
 
 cnn_csv_candidates <- c(
   file.path(models_dir, "cnn_features_mobilenetv2.csv"),
@@ -27,10 +32,17 @@ stop_if_missing <- function(path, hint) {
   if (!file.exists(path)) stop(paste0("Missing file: ", path, "\n\n", hint), call. = FALSE)
 }
 
-stop_if_missing(
-  advanced_csv,
-  "Run:\n  python3 extract_advanced_features_v2.py\n"
-)
+if (is.na(advanced_csv) || !nzchar(advanced_csv)) {
+  stop(
+    paste0(
+      "Missing advanced features CSV.\n\n",
+      "Run one of:\n",
+      "  python3 extract_advanced_features_v3.py\n",
+      "  python3 extract_advanced_features_v2.py\n"
+    ),
+    call. = FALSE
+  )
+}
 
 cat("========================================\n")
 cat("Tiered Model Training (Feature Importance)\n")
@@ -140,7 +152,20 @@ smote_balance <- function(X_df, y_factor, target_n = NULL, k = 5, seed = 42) {
 }
 
 # --- Feature importance selection (top 365) ---
-select_top_features <- function(X_df, y_factor, top_n = 365, critical_prefixes = c("centering_", "corner_", "hires_corner_", "corner_circularity_", "log_")) {
+select_top_features <- function(
+  X_df,
+  y_factor,
+  top_n = 365,
+  critical_prefixes = c(
+    "centering_",
+    "corner_",
+    "hires_corner_",
+    "corner_circularity_",
+    "log_",
+    "lab_",
+    "patch_"
+  )
+) {
   y_factor <- as.factor(y_factor)
   # Train a RF for importance on the full dataset.
   # (If you want stricter validation, compute importance inside each CV fold.)
@@ -245,6 +270,8 @@ dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
 tiered_model <- list(
   version = "tiered_v1",
   selected_features = selected_features,
+  class_levels = levels(df$label),
+  tier_levels = levels(df$tier),
   tier1_model = tier1_model,
   low_model = low_model,
   mid_model = mid_model,
