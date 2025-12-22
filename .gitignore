@@ -1,0 +1,27 @@
+# Log files
+*.log
+
+# Large model files (keep in models/ but don't track huge ones)
+models/hybrid_pca_model.rds
+models/advanced_features.csv
+models/advanced_features.pkl
+models/cnn_features_resnet50.csv
+models/cnn_features_resnet50.pkl
+models/features_cache.rds
+
+# Python cache
+__pycache__/
+*.pyc
+
+# R session files
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
