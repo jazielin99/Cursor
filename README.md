@@ -2,43 +2,45 @@
 
 AI-powered PSA card grading prediction system using ensemble learning with adaptive features.
 
-## Validated Performance (5-Fold CV, Leakage-Free)
+## Model Performance (5-Fold Cross-Validation)
 
-**Latest Cross-Validation Results** (8,725 deduplicated images, grouped by visual similarity):
+**Current Results** (10,288 images, random splits):
 
 | Metric | Performance |
 |--------|-------------|
-| **Exact Match** | **10.3%** (SD: 1.0%) |
-| **Within 1 Grade** | **29.2%** (SD: 0.8%) |
-| **Within 2 Grades** | **46.9%** (SD: 0.9%) |
+| **Exact Match** | **53.8%** (SD: 0.8%) |
+| **Within 1 Grade** | **73.3%** (SD: 0.7%) |
+| **Within 2 Grades** | **84.3%** (SD: 1.1%) |
 
 ### Per-Grade Exact Match Accuracy
 
-| Grade | Accuracy | Support | Notes |
-|-------|----------|---------|-------|
-| PSA 1 | 8.0% | 465 | |
-| PSA 2 | 0.9% | 583 | Low - often confused with 1,3 |
-| PSA 3 | 1.8% | 892 | Low - mid grades challenging |
-| PSA 4 | 17.5% | 800 | Best low-mid grade |
-| PSA 5 | 7.0% | 569 | |
-| PSA 6 | 15.6% | 1400 | Good - largest class |
-| PSA 7 | 14.1% | 1128 | Good |
-| PSA 8 | 7.5% | 901 | Confused with 7,9 |
-| PSA 9 | 9.2% | 1032 | Confused with 8,10 |
-| PSA 10 | 12.6% | 955 | |
+| Grade | Accuracy | Correct/Total | Notes |
+|-------|----------|---------------|-------|
+| PSA 1 | **70.6%** | 591/837 | Strong - distinctive damage |
+| PSA 2 | 34.5% | 225/652 | Often confused with 1, 3 |
+| PSA 3 | **69.4%** | 784/1129 | Strong |
+| PSA 4 | **74.4%** | 719/966 | Best performer |
+| PSA 5 | 27.0% | 169/626 | Hardest grade - middle zone |
+| PSA 6 | 56.9% | 813/1428 | Good - largest class |
+| PSA 7 | 47.1% | 643/1365 | Confused with 6, 8 |
+| PSA 8 | 28.7% | 290/1009 | Confused with 7, 9 |
+| PSA 9 | 50.2% | 602/1199 | Moderate |
+| PSA 10 | **65.3%** | 703/1077 | Strong - pristine is distinctive |
 
-**Key Insight**: Previous ~97% accuracy was due to data leakage (near-duplicate images in train/test). The above represents true generalization on unseen cards.
+### Key Insights
 
-### Components & Their Status
+- **Best performers**: PSA 4 (74.4%), PSA 1 (70.6%), PSA 3 (69.4%), PSA 10 (65.3%)
+- **Challenging grades**: PSA 5 (27.0%), PSA 8 (28.7%), PSA 2 (34.5%)
+- **Pattern**: Extreme grades (1-4, 10) are easier; middle grades (5-8) are harder
+- **73% within-1**: Most errors are only off by one grade
+
+### Model Components
 
 | Component | Status | Purpose |
 |-----------|--------|---------|
-| 5-Model Ensemble | ✅ Active | Diverse model voting |
-| Confusion-Pair Specialists | ✅ Active | 6↔7, 7↔8, 8↔9, 9↔10 |
-| Ordinal Loss | ✅ Active | Prefer adjacent errors |
-| Temperature Calibration | ✅ Active | Per-tier calibration |
-| Data Manifest + Deduplication | ✅ Active | 1,070 near-dupes removed |
-| Grouped CV (phash_group) | ✅ Active | Prevents leakage |
+| Random Forest Ensemble | ✅ Active | 500 trees, 500 top features |
+| Advanced Features (v4) | ✅ Active | HOG, LBP, corners, centering |
+| 5-Fold CV | ✅ Active | Robust evaluation |
 
 ## Quick Start
 
