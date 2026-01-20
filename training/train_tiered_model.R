@@ -54,6 +54,10 @@ adv <- read.csv(advanced_csv, check.names = FALSE)
 if (!"label" %in% colnames(adv)) stop("advanced_features_v2.csv must include a 'label' column.", call. = FALSE)
 if (!"path" %in% colnames(adv)) stop("advanced_features_v2.csv must include a 'path' column.", call. = FALSE)
 
+# Filter out PSA_1.5 (not used in current model)
+cat("Filtering out PSA_1.5 grades...\n")
+adv <- adv[adv$label != "PSA_1.5", , drop = FALSE]
+
 if (!is.na(cnn_csv) && nzchar(cnn_csv)) {
   cat("Loading CNN features:", cnn_csv, "\n")
   cnn <- read.csv(cnn_csv, check.names = FALSE)
@@ -343,7 +347,9 @@ tiered_model <- list(
     psa_9_vs_10 = features_9v10,
     reg = features_tier1
   ),
-  class_levels = levels(df$label),
+  # Exclude PSA_1.5 from class levels
+  class_levels = c("PSA_1", "PSA_2", "PSA_3", "PSA_4", "PSA_5", 
+                   "PSA_6", "PSA_7", "PSA_8", "PSA_9", "PSA_10"),
   tier_levels = levels(df$tier),
   tier1_model = tier1_model,
   low_model = low_model,

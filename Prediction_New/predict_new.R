@@ -138,7 +138,8 @@ suppressPackageStartupMessages({
 }
 
 .consensus_grade_probs <- function(tm, hg, bin, row, tier_weight_gamma = 2) {
-  class_levels <- tm$class_levels %||% sort(unique(c("PSA_1","PSA_1.5","PSA_2","PSA_3","PSA_4","PSA_5","PSA_6","PSA_7","PSA_8","PSA_9","PSA_10")))
+  # Exclude PSA_1.5 from class levels
+  class_levels <- tm$class_levels %||% c("PSA_1","PSA_2","PSA_3","PSA_4","PSA_5","PSA_6","PSA_7","PSA_8","PSA_9","PSA_10")
 
   tier_probs <- .predict_ranger_prob(tm$tier1_model, row[, tm$feature_sets$tier1, drop = FALSE])
   if (!is.null(tm$tier_levels)) {
