@@ -4,43 +4,48 @@ AI-powered PSA card grading prediction system using ensemble learning with adapt
 
 ## Model Performance (5-Fold Cross-Validation)
 
-**Current Results** (10,288 images, random splits):
+**Balanced Ensemble Results** (10,288 images):
 
 | Metric | Performance |
 |--------|-------------|
-| **Exact Match** | **53.8%** (SD: 0.8%) |
-| **Within 1 Grade** | **73.3%** (SD: 0.7%) |
-| **Within 2 Grades** | **84.3%** (SD: 1.1%) |
+| **Exact Match** | **53.4%** (SD: 1.1%) |
+| **Within 1 Grade** | **73.5%** |
+| **Within 2 Grades** | **84.9%** |
 
 ### Per-Grade Exact Match Accuracy
 
-| Grade | Accuracy | Correct/Total | Notes |
-|-------|----------|---------------|-------|
-| PSA 1 | **70.6%** | 591/837 | Strong - distinctive damage |
-| PSA 2 | 34.5% | 225/652 | Often confused with 1, 3 |
-| PSA 3 | **69.4%** | 784/1129 | Strong |
-| PSA 4 | **74.4%** | 719/966 | Best performer |
-| PSA 5 | 27.0% | 169/626 | Hardest grade - middle zone |
-| PSA 6 | 56.9% | 813/1428 | Good - largest class |
-| PSA 7 | 47.1% | 643/1365 | Confused with 6, 8 |
-| PSA 8 | 28.7% | 290/1009 | Confused with 7, 9 |
-| PSA 9 | 50.2% | 602/1199 | Moderate |
-| PSA 10 | **65.3%** | 703/1077 | Strong - pristine is distinctive |
+| Grade | Accuracy | Correct/Total | vs Baseline | Notes |
+|-------|----------|---------------|-------------|-------|
+| PSA 1 | 68.7% | 575/837 | -1.9% | Strong - distinctive damage |
+| PSA 2 | **46.3%** | 302/652 | **+11.8%** | Improved with specialist |
+| PSA 3 | 63.8% | 720/1129 | -5.6% | Good |
+| PSA 4 | 67.0% | 647/966 | -7.4% | Strong |
+| PSA 5 | **45.2%** | 283/626 | **+18.2%** | Major improvement |
+| PSA 6 | 50.6% | 722/1428 | -6.3% | Moderate |
+| PSA 7 | 44.7% | 610/1365 | -2.4% | Moderate |
+| PSA 8 | **43.5%** | 439/1009 | **+14.8%** | Major improvement |
+| PSA 9 | 42.8% | 513/1199 | -7.4% | Confused with 8, 10 |
+| PSA 10 | 63.2% | 681/1077 | -2.1% | Strong |
 
-### Key Insights
+### Hard Class Improvements
 
-- **Best performers**: PSA 4 (74.4%), PSA 1 (70.6%), PSA 3 (69.4%), PSA 10 (65.3%)
-- **Challenging grades**: PSA 5 (27.0%), PSA 8 (28.7%), PSA 2 (34.5%)
-- **Pattern**: Extreme grades (1-4, 10) are easier; middle grades (5-8) are harder
-- **73% within-1**: Most errors are only off by one grade
+The balanced ensemble specifically targets PSA 2, 5, and 8 which were previously the worst performers:
+
+| Grade | Baseline | Improved | Change |
+|-------|----------|----------|--------|
+| PSA 2 | 34.5% | **46.3%** | **+11.8%** |
+| PSA 5 | 27.0% | **45.2%** | **+18.2%** |
+| PSA 8 | 28.7% | **43.5%** | **+14.8%** |
 
 ### Model Components
 
 | Component | Status | Purpose |
 |-----------|--------|---------|
-| Random Forest Ensemble | ✅ Active | 500 trees, 500 top features |
+| Base Model | ✅ Active | 500 trees, good overall accuracy |
+| Specialist Model | ✅ Active | Upweighted hard classes (2, 5, 8) |
+| SMOTE Oversampling | ✅ Active | 1.5x synthetic samples for hard classes |
+| Confidence Blending | ✅ Active | Combines base + specialist predictions |
 | Advanced Features (v4) | ✅ Active | HOG, LBP, corners, centering |
-| 5-Fold CV | ✅ Active | Robust evaluation |
 
 ## Quick Start
 
@@ -251,9 +256,31 @@ Rscript training/train_ensemble_model.R
 # - Saved to models/ensemble_cv_results.csv
 ```
 
-## iOS App
+## Web App (Mobile-Friendly)
 
-Mobile app for taking photos and getting predictions:
+Access the grader from any device with a browser:
+
+```bash
+# Install dependencies
+cd webapp
+pip install -r requirements.txt
+
+# Run the server
+python app.py
+
+# Access at http://localhost:5000
+# Or from phone: http://<your-ip>:5000
+```
+
+Features:
+- Camera capture or photo upload
+- Real-time grade predictions
+- Confidence scores and probability breakdown
+- Works on iOS, Android, and desktop
+
+## iOS App (Native)
+
+Native iOS app for offline predictions:
 
 ```bash
 # Start backend
