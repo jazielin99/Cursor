@@ -39,65 +39,45 @@ Cross-validation results on ~13,000+ images:
 
 ```
 ├── data/
-│   └── training/           # Training images organized by grade
-│       ├── PSA_1/          # 386 images
-│       ├── PSA_2/          # 383 images
-│       ├── PSA_3/          # 415 images
-│       ├── PSA_4/          # 1,837 images
-│       ├── PSA_5/          # 1,066 images
-│       ├── PSA_6/          # 2,063 images
-│       ├── PSA_7/          # 1,722 images
-│       ├── PSA_8/          # 1,736 images
-│       ├── PSA_9/          # 1,990 images
-│       └── PSA_10/         # 1,759 images
+│   └── training/           # Training images organized by grade (PSA 1-10)
 │
 ├── models/                 # Trained models and extracted features
-│   ├── tiered_model.rds           # Main tiered classifier (Binary Triage)
+│   ├── tiered_model.rds           # Main classifier (Binary Triage)
 │   ├── high_grade_specialist.rds  # PSA 8/9/10 specialist
 │   ├── psa_9_vs_10.rds            # Binary 9 vs 10 classifier
-│   ├── advanced_features_v4.csv   # Extracted engineered features (v4)
+│   ├── advanced_features.csv      # Extracted engineered features
 │   └── cnn_features_mobilenetv2.csv  # CNN bottleneck features
 │
-├── scripts/                # Python scripts
+├── scripts/
 │   ├── feature_extraction/
-│   │   ├── extract_advanced_features_v4.py  # Adaptive ROI + Art-Box Centering
-│   │   ├── extract_advanced_features_v3.py  # 6,312 features
-│   │   ├── extract_cnn_features_batch.py    # MobileNetV2 (1,280 features)
-│   │   └── extract_cnn_features_single.py   # Single-image CNN extraction
+│   │   ├── extract_advanced_features.py   # ★ Main feature extractor
+│   │   ├── extract_cnn_features_batch.py  # MobileNetV2 batch extraction
+│   │   └── extract_cnn_features_single.py # Single-image CNN extraction
 │   ├── llm_integration/
-│   │   └── llm_grading_assistant.py         # LLM Visual Auditor
+│   │   └── llm_grading_assistant.py       # LLM Visual Auditor
 │   └── data_collection/
-│       ├── scrape_comc.R
 │       └── scrape_comc_curl.sh
 │
-├── training/               # R training scripts
-│   ├── train_tiered_model_v2.R    # ★ Binary Triage + Back-of-Card
-│   ├── train_tiered_model.R       # Original tiered system
-│   ├── train_balanced_model.R     # Basic balanced RF
-│   ├── train_corner_model.R       # Corner-focused features
-│   ├── train_ensemble_cv.R        # RF + XGBoost ensemble
-│   └── train_keras_generator.R    # Keras/TensorFlow CNN
+├── training/
+│   └── train_tiered_model.R       # ★ Binary Triage training
 │
-├── evaluation/             # Evaluation scripts
+├── evaluation/
 │   └── evaluate_tiered_cv.R       # K-fold cross-validation
 │
 ├── R/                      # Core R functions
-│   ├── main.R                     # Entry point
-│   ├── config.R                   # Configuration
-│   ├── grading_standards.R        # PSA grade definitions
-│   ├── 01_setup.R - 05_prediction.R  # Pipeline modules
-│   └── crop_slabs.R               # Slab cropping utility
+│   ├── main.R, config.R, grading_standards.R
+│   ├── 01_setup.R - 05_prediction.R
+│   └── crop_slabs.R
 │
 ├── examples/               # Example usage scripts
-│   ├── 01_basic_usage.R
-│   ├── 02_advanced_training.R
-│   ├── 03_image_collection_helper.R
-│   └── 04_traditional_ml_fallback.R
 │
-└── Prediction_New/         # Prediction interface
-    ├── predict_new_v2.R           # ★ Binary Triage + LLM Integration
-    ├── predict_new.R              # Legacy predictor
-    └── predict_grade.R            # Alternative predictor
+├── Prediction_New/
+│   └── predict_new.R              # ★ Main prediction script
+│
+└── old_versions/           # Archived previous versions
+    ├── feature_extraction/        # v1, v2, v3 extractors
+    ├── training/                  # Legacy training scripts
+    └── prediction/                # Legacy prediction scripts
 ```
 
 ## Quick Start
@@ -119,11 +99,8 @@ install.packages(c("ranger", "randomForest", "magick", "xgboost", "keras3", "smo
 ```bash
 # From project root:
 
-# V4 features with Adaptive ROI + Art-Box Centering (RECOMMENDED)
-python3 scripts/feature_extraction/extract_advanced_features_v4.py
-
-# Or legacy v3 features
-python3 scripts/feature_extraction/extract_advanced_features_v3.py
+# Advanced features with Adaptive ROI + Art-Box Centering
+python3 scripts/feature_extraction/extract_advanced_features.py
 
 # CNN features (MobileNetV2, 1,280 dims) - optional but recommended
 python3 scripts/feature_extraction/extract_cnn_features_batch.py
@@ -132,17 +109,14 @@ python3 scripts/feature_extraction/extract_cnn_features_batch.py
 ### 3. Train the Model
 
 ```bash
-# Recommended: Binary Triage model (v2)
-Rscript training/train_tiered_model_v2.R
-
-# Or legacy tiered model
+# Train Binary Triage model
 Rscript training/train_tiered_model.R
 ```
 
 ### 4. Make Predictions
 
 ```r
-source("Prediction_New/predict_new_v2.R")
+source("Prediction_New/predict_new.R")
 
 # Single prediction
 result <- predict_grade("path/to/card.jpg")
@@ -349,11 +323,13 @@ Results are saved to `models/` as CSV and TXT files.
 
 | Script | Model Type | Best For | Accuracy |
 |---|---|---|---:|
-| `train_tiered_model_v2.R` | Binary Triage + Specialists | Production use | ~58% exact |
-| `train_tiered_model.R` | 3-Tier RF + Specialists | Legacy support | ~57% exact |
-| `train_balanced_model.R` | Basic RF | Quick baseline | ~45% exact |
-| `train_corner_model.R` | Corner-focused RF | Corner analysis | ~48% exact |
-| `train_ensemble_cv.R` | RF + XGBoost | Ensemble learning | ~49% exact |
+| `train_tiered_model.R` | Binary Triage + Specialists | Production use | ~58% exact |
+
+**Legacy scripts** (in `old_versions/training/`):
+- `train_tiered_model.R` - Original 3-tier system (~57% exact)
+- `train_balanced_model.R` - Basic RF (~45% exact)
+- `train_corner_model.R` - Corner-focused (~48% exact)
+- `train_ensemble_cv.R` - RF + XGBoost ensemble (~49% exact)
 
 ## Real-World Sanity Tests
 

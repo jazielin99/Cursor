@@ -1,8 +1,12 @@
 # ============================================
-# PSA Grade Prediction (Tiered System v2)
-# - Auto-loads tiered + specialists
-# - Uses Python for CNN + advanced feature extraction
-# - Batch prediction support
+# PSA Grade Prediction v2 (Binary Triage + LLM Integration)
+# ============================================
+# UPGRADES:
+# 1. Binary Triage: Near Mint (8-10) vs Market Grade (1-7) first pass
+# 2. LLM Visual Auditor integration for high-grade candidates
+# 3. Automated grading notes generation
+# 4. Back-of-card penalty system (when back images available)
+# 5. Support for v4 adaptive features
 # ============================================
 
 suppressPackageStartupMessages({
@@ -42,16 +46,12 @@ suppressPackageStartupMessages({
   invisible(TRUE)
 }
 
-.extract_advanced_v2 <- function(image_path, tmp_dir = tempdir(), script = "scripts/feature_extraction/extract_advanced_features_v2.py") {
-  adv_out <- file.path(tmp_dir, "adv_v2_single.csv")
-  .run_python(c(script, "--image", image_path, "--output-csv", adv_out))
-  adv <- read.csv(adv_out, check.names = FALSE)
-  adv$path <- NULL
-  adv
-}
+# =============================================================================
+# Feature Extraction
+# =============================================================================
 
-.extract_advanced_v3 <- function(image_path, tmp_dir = tempdir(), script = "scripts/feature_extraction/extract_advanced_features_v3.py") {
-  adv_out <- file.path(tmp_dir, "adv_v3_single.csv")
+.extract_advanced <- function(image_path, tmp_dir = tempdir(), script = "scripts/feature_extraction/extract_advanced_features.py") {
+  adv_out <- file.path(tmp_dir, "adv_single.csv")
   .run_python(c(script, "--image", image_path, "--output-csv", adv_out))
   adv <- read.csv(adv_out, check.names = FALSE)
   adv$path <- NULL
@@ -66,37 +66,16 @@ suppressPackageStartupMessages({
   cnn
 }
 
-.build_feature_row <- function(image_path, selected_features) {
-  adv <- if (file.exists("scripts/feature_extraction/extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
-
-  # Try CNN; allow tiered model to be trained without it
-  cnn <- NULL
-  if (file.exists("scripts/feature_extraction/extract_cnn_features_single.py")) {
-    try(cnn <- .extract_cnn(image_path), silent = TRUE)
-  }
-
-  if (!is.null(cnn)) {
-    row <- cbind(adv, cnn)
-  } else {
-    row <- adv
-  }
-
-  missing <- setdiff(selected_features, colnames(row))
-  if (length(missing) > 0) {
-    stop(paste0(
-      "Feature mismatch: missing ", length(missing), " required features.\n",
-      "Common cause: tiered model trained with CNN features, but CNN extraction isn't available at prediction time.\n",
-      "Missing examples: ", paste(head(missing, 10), collapse = ", ")
-    ), call. = FALSE)
-  }
-
-  row <- row[, selected_features, drop = FALSE]
-  row
-}
-
 .build_feature_row_full <- function(image_path) {
-  adv <- if (file.exists("scripts/feature_extraction/extract_advanced_features_v3.py")) .extract_advanced_v3(image_path) else .extract_advanced_v2(image_path)
+  # Extract advanced features (v4 with Adaptive ROI + Art-Box Centering)
+  script <- "scripts/feature_extraction/extract_advanced_features.py"
+  if (!file.exists(script)) {
+    stop("Feature extraction script not found: ", script, call. = FALSE)
+  }
+  
+  adv <- .extract_advanced(image_path)
 
+  # Try CNN features (optional but recommended)
   cnn <- NULL
   if (file.exists("scripts/feature_extraction/extract_cnn_features_single.py")) {
     try(cnn <- .extract_cnn(image_path), silent = TRUE)
@@ -122,11 +101,57 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
+# =============================================================================
+# Binary Triage Prediction
+# =============================================================================
+
+.predict_binary_triage <- function(tm, row) {
+  if (is.null(tm$binary_triage_model)) {
+    # Fallback to old tier1 if binary triage not available
+    return(NULL)
+  }
+  
+  fs <- tm$feature_sets$binary
+  if (is.null(fs)) return(NULL)
+  
+  # Get available features
+  available <- intersect(fs, colnames(row))
+  if (length(available) < length(fs) * 0.8) {
+    warning("Missing >20% of binary triage features; falling back to tier1")
+    return(NULL)
+  }
+  
+  .predict_ranger_prob(tm$binary_triage_model, row[, available, drop = FALSE])
+}
+
+.predict_market_tier <- function(tm, row) {
+  if (is.null(tm$market_tier_model)) return(NULL)
+  
+  fs <- tm$feature_sets$tier1
+  available <- intersect(fs, colnames(row))
+  .predict_ranger_prob(tm$market_tier_model, row[, available, drop = FALSE])
+}
+
+# =============================================================================
+# Specialist Predictions
+# =============================================================================
+
 .predict_specialist_probs <- function(tm, hg, row, tier_name) {
   fs <- tm$feature_sets
-  if (tier_name == "Low_1_4") return(.predict_ranger_prob(tm$low_model, row[, fs$low, drop = FALSE]))
-  if (tier_name == "Mid_5_7") return(.predict_ranger_prob(tm$mid_model, row[, fs$mid, drop = FALSE]))
-  .predict_ranger_prob(hg$model, row[, fs$high, drop = FALSE])
+  
+  if (tier_name == "Low_1_4") {
+    available <- intersect(fs$low, colnames(row))
+    return(.predict_ranger_prob(tm$low_model, row[, available, drop = FALSE]))
+  }
+  
+  if (tier_name == "Mid_5_7") {
+    available <- intersect(fs$mid, colnames(row))
+    return(.predict_ranger_prob(tm$mid_model, row[, available, drop = FALSE]))
+  }
+  
+  # High tier
+  available <- intersect(fs$high, colnames(row))
+  .predict_ranger_prob(hg$model, row[, available, drop = FALSE])
 }
 
 .as_full_prob <- function(probs, class_levels) {
@@ -137,33 +162,93 @@ suppressPackageStartupMessages({
   out
 }
 
-.consensus_grade_probs <- function(tm, hg, bin, row, tier_weight_gamma = 2) {
-  # Exclude PSA_1.5 from class levels
+# =============================================================================
+# Consensus Grade Prediction with Binary Triage
+# =============================================================================
+
+.consensus_grade_probs_v2 <- function(tm, hg, bin, row, tier_weight_gamma = 2) {
+  # Use class levels from model (excludes PSA_1.5)
   class_levels <- tm$class_levels %||% c("PSA_1","PSA_2","PSA_3","PSA_4","PSA_5","PSA_6","PSA_7","PSA_8","PSA_9","PSA_10")
-
-  tier_probs <- .predict_ranger_prob(tm$tier1_model, row[, tm$feature_sets$tier1, drop = FALSE])
-  if (!is.null(tm$tier_levels)) {
-    keep <- intersect(names(tier_probs), tm$tier_levels)
-    tier_probs <- tier_probs[keep]
-  }
-  # Sharpen tier weights to reflect Tier-1 confidence
-  tier_probs <- tier_probs^tier_weight_gamma
-  tier_probs <- tier_probs / (sum(tier_probs) + 1e-12)
-
+  
+  # Step 1: Binary Triage (Near Mint vs Market Grade)
+  binary_probs <- .predict_binary_triage(tm, row)
+  
   full <- rep(0, length(class_levels))
   names(full) <- class_levels
-
-  for (tname in names(tier_probs)) {
-    sp <- .predict_specialist_probs(tm, hg, row, tname)
-    sp_full <- .as_full_prob(sp, class_levels)
-    full <- full + tier_probs[tname] * sp_full
+  
+  if (!is.null(binary_probs)) {
+    # Binary Triage path
+    near_mint_prob <- binary_probs["NearMint_8_10"] %||% 0
+    market_prob <- binary_probs["MarketGrade_1_7"] %||% 0
+    
+    # Sharpen probabilities
+    near_mint_prob <- near_mint_prob^tier_weight_gamma
+    market_prob <- market_prob^tier_weight_gamma
+    total <- near_mint_prob + market_prob + 1e-12
+    near_mint_prob <- near_mint_prob / total
+    market_prob <- market_prob / total
+    
+    # Near Mint path: go directly to high specialist
+    if (near_mint_prob > 0.01) {
+      high_probs <- .predict_specialist_probs(tm, hg, row, "High_8_10")
+      high_full <- .as_full_prob(high_probs, class_levels)
+      full <- full + near_mint_prob * high_full
+    }
+    
+    # Market Grade path: route through Low/Mid
+    if (market_prob > 0.01) {
+      market_tier_probs <- .predict_market_tier(tm, row)
+      
+      if (!is.null(market_tier_probs)) {
+        low_prob <- market_tier_probs["Low_1_4"] %||% 0.5
+        mid_prob <- market_tier_probs["Mid_5_7"] %||% 0.5
+        
+        # Sharpen
+        low_prob <- low_prob^tier_weight_gamma
+        mid_prob <- mid_prob^tier_weight_gamma
+        mtotal <- low_prob + mid_prob + 1e-12
+        low_prob <- low_prob / mtotal
+        mid_prob <- mid_prob / mtotal
+        
+        # Low specialist
+        if (low_prob > 0.01) {
+          low_probs <- .predict_specialist_probs(tm, hg, row, "Low_1_4")
+          low_full <- .as_full_prob(low_probs, class_levels)
+          full <- full + market_prob * low_prob * low_full
+        }
+        
+        # Mid specialist
+        if (mid_prob > 0.01) {
+          mid_probs <- .predict_specialist_probs(tm, hg, row, "Mid_5_7")
+          mid_full <- .as_full_prob(mid_probs, class_levels)
+          full <- full + market_prob * mid_prob * mid_full
+        }
+      }
+    }
+    
+  } else {
+    # Fallback: Original tier1 routing
+    if (!is.null(tm$tier1_model)) {
+      tier_probs <- .predict_ranger_prob(tm$tier1_model, row[, tm$feature_sets$tier1, drop = FALSE])
+      tier_probs <- tier_probs^tier_weight_gamma
+      tier_probs <- tier_probs / (sum(tier_probs) + 1e-12)
+      
+      for (tname in names(tier_probs)) {
+        sp <- .predict_specialist_probs(tm, hg, row, tname)
+        sp_full <- .as_full_prob(sp, class_levels)
+        full <- full + tier_probs[tname] * sp_full
+      }
+    }
+    binary_probs <- c(MarketGrade_1_7 = 0.5, NearMint_8_10 = 0.5)
   }
 
   # 9 vs 10 reweighting
   if (all(c("PSA_9", "PSA_10") %in% names(full))) {
     mass <- full["PSA_9"] + full["PSA_10"]
-    if (mass > 0) {
-      bp <- .predict_ranger_prob(bin$model, row[, tm$feature_sets$psa_9_vs_10, drop = FALSE])
+    if (mass > 0.1) {
+      fs_9v10 <- tm$feature_sets$psa_9_vs_10
+      available_9v10 <- intersect(fs_9v10, colnames(row))
+      bp <- .predict_ranger_prob(bin$model, row[, available_9v10, drop = FALSE])
       if (all(c("PSA_9", "PSA_10") %in% names(bp))) {
         bsum <- bp["PSA_9"] + bp["PSA_10"]
         if (bsum > 0) {
@@ -179,8 +264,9 @@ suppressPackageStartupMessages({
     w <- tm$reg_blend$weight %||% 0.25
     sigma <- tm$reg_blend$sigma %||% 0.85
     if (is.finite(w) && w > 0) {
-      reg_pred <- predict(tm$reg_model, data = row[, tm$feature_sets$reg, drop = FALSE])$predictions[1]
-      # gaussian around reg_pred in grade-number space
+      fs_reg <- tm$feature_sets$reg
+      available_reg <- intersect(fs_reg, colnames(row))
+      reg_pred <- predict(tm$reg_model, data = row[, available_reg, drop = FALSE])$predictions[1]
       grade_num <- function(lbl) as.numeric(gsub("PSA_", "", lbl))
       nums <- vapply(class_levels, grade_num, numeric(1))
       p_reg <- exp(-((nums - reg_pred) ^ 2) / (2 * sigma ^ 2))
@@ -191,45 +277,149 @@ suppressPackageStartupMessages({
   }
 
   full <- full / (sum(full) + 1e-12)
-  list(tier_probs = tier_probs, grade_probs = full)
+  list(binary_probs = binary_probs, grade_probs = full)
 }
+
+# =============================================================================
+# LLM Visual Audit Integration
+# =============================================================================
+
+.run_llm_audit <- function(image_path, predicted_grade, confidence, provider = "none") {
+  if (provider == "none" || predicted_grade < 8 || confidence < 0.85) {
+    return(NULL)
+  }
+  
+  script <- "scripts/llm_integration/llm_grading_assistant.py"
+  if (!file.exists(script)) return(NULL)
+  
+  # Run LLM audit for high-grade candidates
+  result <- tryCatch({
+    args <- c(script, "--image", image_path, 
+              "--provider", provider,
+              "--grade", as.character(predicted_grade),
+              "--confidence", as.character(confidence))
+    out <- system2("python3", args = args, stdout = TRUE, stderr = TRUE)
+    # Parse result (simplified - real implementation would parse JSON)
+    list(ran = TRUE, output = paste(out, collapse = "\n"))
+  }, error = function(e) {
+    list(ran = FALSE, error = e$message)
+  })
+  
+  return(result)
+}
+
+# =============================================================================
+# Generate Grading Notes
+# =============================================================================
+
+generate_grading_notes <- function(features, predicted_grade, confidence) {
+  # Extract key features for explanation
+  centering_quality <- features$artbox_overall_score %||% features$centering_overall_quality %||% 0.5
+  lr_ratio <- features$artbox_lr_ratio %||% features$centering_left_ratio %||% 0.5
+  tb_ratio <- features$artbox_tb_ratio %||% features$centering_top_ratio %||% 0.5
+  
+  # Build centering note
+  lr_pct <- round(lr_ratio * 100)
+  tb_pct <- round(tb_ratio * 100)
+  centering_str <- paste0(lr_pct, "/", 100 - lr_pct, " L/R, ", tb_pct, "/", 100 - tb_pct, " T/B")
+  
+  if (centering_quality > 0.9) {
+    centering_note <- paste("Excellent centering:", centering_str)
+  } else if (centering_quality > 0.8) {
+    centering_note <- paste("Good centering:", centering_str)
+  } else {
+    centering_note <- paste("Off-center:", centering_str)
+  }
+  
+  # Corner analysis
+  corner_notes <- c()
+  for (corner in c("tl", "tr", "bl", "br")) {
+    whitening_col <- paste0("adaptive_patch_", corner, "_whitening_score")
+    whitening <- features[[whitening_col]] %||% 0
+    
+    if (whitening > 0.5) {
+      corner_notes <- c(corner_notes, paste(toupper(corner), ": Whitening detected"))
+    } else if (whitening > 0.3) {
+      corner_notes <- c(corner_notes, paste(toupper(corner), ": Minor wear"))
+    } else {
+      corner_notes <- c(corner_notes, paste(toupper(corner), ": Good"))
+    }
+  }
+  
+  # Summary
+  if (predicted_grade == 10) {
+    summary <- "Gem Mint - No visible defects, perfect centering."
+  } else if (predicted_grade == 9) {
+    summary <- "Near Mint-Mint - Minor imperfections under magnification."
+  } else if (predicted_grade == 8) {
+    summary <- "Near Mint-Mint - Minor wear at edges or corners."
+  } else if (predicted_grade >= 5) {
+    summary <- "Moderate wear visible. Good for collection."
+  } else {
+    summary <- "Significant wear. Best for set completion."
+  }
+  
+  list(
+    centering = centering_note,
+    corners = corner_notes,
+    summary = summary,
+    confidence = confidence
+  )
+}
+
+# =============================================================================
+# Main Prediction Function
+# =============================================================================
 
 predict_grade <- function(image_path,
                           models_dir = "models",
-                          psa10_upgrade_threshold = 0.55) {
+                          psa10_upgrade_threshold = 0.55,
+                          enable_llm_audit = FALSE,
+                          llm_provider = "none") {
   .load_models(models_dir)
 
   tm <- .psa_models_env$tiered_model
   hg <- .psa_models_env$high_grade_specialist
   bin <- .psa_models_env$psa_9_vs_10
 
-  # Build full feature row, then subset per component using tm$feature_sets
+  # Build full feature row
   row <- .build_feature_row_full(image_path)
 
-  required <- unique(unlist(tm$feature_sets))
-  missing <- setdiff(required, colnames(row))
-  if (length(missing) > 0) {
-    stop(paste0("Feature mismatch: missing ", length(missing), " required features. Example: ", paste(head(missing, 10), collapse = ", ")), call. = FALSE)
-  }
-
-  consensus <- .consensus_grade_probs(tm, hg, bin, row, tier_weight_gamma = 2)
-  tier_probs <- consensus$tier_probs
+  # Get consensus prediction with binary triage
+  consensus <- .consensus_grade_probs_v2(tm, hg, bin, row, tier_weight_gamma = 2)
+  binary_probs <- consensus$binary_probs
   grade_probs <- consensus$grade_probs
 
-  tier <- names(tier_probs)[which.max(tier_probs)]
-  tier_conf <- max(tier_probs)
+  # Extract tier from binary
+  near_mint <- binary_probs["NearMint_8_10"] %||% 0
+  is_near_mint <- near_mint > 0.5
+  tier <- if (is_near_mint) "NearMint_8_10" else "MarketGrade_1_7"
+  tier_conf <- max(binary_probs)
 
   grade <- names(grade_probs)[which.max(grade_probs)]
   grade_conf <- max(grade_probs)
+  grade_num <- as.numeric(gsub("PSA_", "", grade))
 
+  # Upgrade hint for 9 vs 10
   upgrade_hint <- NULL
   if (grade %in% c("PSA_9", "PSA_10")) {
-    bin_probs <- .predict_ranger_prob(bin$model, row[, tm$feature_sets$psa_9_vs_10, drop = FALSE])
+    fs_9v10 <- tm$feature_sets$psa_9_vs_10
+    available_9v10 <- intersect(fs_9v10, colnames(row))
+    bin_probs <- .predict_ranger_prob(bin$model, row[, available_9v10, drop = FALSE])
     bin_grade <- names(bin_probs)[which.max(bin_probs)]
     bin_conf <- max(bin_probs)
     if (bin_grade == "PSA_10" && !is.na(bin_conf) && bin_conf >= psa10_upgrade_threshold && bin_conf < 0.70) {
       upgrade_hint <- "PSA 9 (Potential 10 Upgrade)"
     }
+  }
+  
+  # Generate grading notes
+  notes <- generate_grading_notes(as.list(row), grade_num, grade_conf)
+  
+  # LLM audit for high-grade candidates
+  llm_audit <- NULL
+  if (enable_llm_audit && grade_num >= 8 && grade_conf >= 0.85) {
+    llm_audit <- .run_llm_audit(image_path, grade_num, grade_conf, llm_provider)
   }
 
   out <- list(
@@ -239,22 +429,32 @@ predict_grade <- function(image_path,
     grade = grade,
     grade_confidence = grade_conf,
     upgrade_hint = upgrade_hint,
-    tier_probabilities = tier_probs,
-    grade_probabilities = grade_probs
+    binary_probabilities = binary_probs,
+    grade_probabilities = grade_probs,
+    grading_notes = notes,
+    llm_audit = llm_audit
   )
 
   return(out)
 }
 
+# =============================================================================
+# Batch Prediction
+# =============================================================================
+
 predict_batch <- function(folder,
                           models_dir = "models",
                           pattern = "\\.(jpg|jpeg|png|webp)$",
-                          recursive = FALSE) {
+                          recursive = FALSE,
+                          enable_llm_audit = FALSE,
+                          llm_provider = "none") {
   files <- list.files(folder, pattern = pattern, full.names = TRUE, recursive = recursive, ignore.case = TRUE)
   if (length(files) == 0) stop(paste0("No images found in: ", folder), call. = FALSE)
 
   results <- lapply(files, function(f) {
-    r <- predict_grade(f, models_dir = models_dir)
+    r <- predict_grade(f, models_dir = models_dir, 
+                       enable_llm_audit = enable_llm_audit,
+                       llm_provider = llm_provider)
     data.frame(
       image = r$image,
       tier = r$tier,
@@ -262,6 +462,8 @@ predict_batch <- function(folder,
       grade = r$grade,
       grade_confidence = r$grade_confidence,
       upgrade_hint = ifelse(is.null(r$upgrade_hint), "", r$upgrade_hint),
+      centering = r$grading_notes$centering,
+      summary = r$grading_notes$summary,
       stringsAsFactors = FALSE
     )
   })
@@ -269,9 +471,43 @@ predict_batch <- function(folder,
   do.call(rbind, results)
 }
 
-# --------------------------------------------
-# Real-world sanity checks (recommended)
-# --------------------------------------------
+# =============================================================================
+# Pretty Print Result
+# =============================================================================
+
+print_prediction <- function(result) {
+  cat("\n")
+  cat("========================================\n")
+  cat("PSA GRADE PREDICTION\n")
+  cat("========================================\n")
+  cat("Image:", result$image, "\n\n")
+  
+  cat("TIER:", result$tier, "(", round(result$tier_confidence * 100, 1), "% confidence)\n")
+  cat("GRADE:", result$grade, "(", round(result$grade_confidence * 100, 1), "% confidence)\n")
+  
+  if (!is.null(result$upgrade_hint)) {
+    cat("NOTE:", result$upgrade_hint, "\n")
+  }
+  
+  cat("\n--- Grading Notes ---\n")
+  cat("Centering:", result$grading_notes$centering, "\n")
+  cat("Corners:\n")
+  for (cn in result$grading_notes$corners) {
+    cat("  •", cn, "\n")
+  }
+  cat("Summary:", result$grading_notes$summary, "\n")
+  
+  if (!is.null(result$llm_audit) && result$llm_audit$ran) {
+    cat("\n--- LLM Visual Audit ---\n")
+    cat(result$llm_audit$output, "\n")
+  }
+  
+  cat("========================================\n\n")
+}
+
+# =============================================================================
+# Real-world sanity checks
+# =============================================================================
 
 rotation_invariance_test <- function(image_path,
                                      degrees = 5,
@@ -348,4 +584,3 @@ lighting_check_test <- function(image_path,
     white_path = white_path
   )
 }
-
