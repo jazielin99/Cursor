@@ -324,7 +324,27 @@ Results are saved to `models/` as CSV and TXT files.
 
 | Script | Model Type | Best For | Accuracy |
 |---|---|---|---:|
-| `train_tiered_model.R` | Binary Triage + Specialists | Production use | ~58% exact |
+| `train_ensemble_model.R` | **5-Model Ensemble + Calibration** | **60%+ target** | ~60% exact |
+| `train_tiered_model.R` | Binary Triage + Specialists | Balanced speed/accuracy | ~58% exact |
+
+### Ensemble Model (60%+ Target)
+
+The `train_ensemble_model.R` implements all high-impact improvements:
+
+```bash
+# First, create data manifest to prevent leakage
+python scripts/data_management/create_data_manifest.py --create-splits
+
+# Then train ensemble
+Rscript training/train_ensemble_model.R
+```
+
+**Key Features:**
+- **5-model ensemble**: Diverse seeds, feature counts, tree depths
+- **Confusion-pair specialists**: Extra models for 6↔7, 7↔8, 8↔9, 9↔10 boundaries
+- **Ordinal-aware loss**: Prefers adjacent grade errors over distant errors
+- **Temperature calibration**: Per-tier probability calibration
+- **Grouped CV**: Prevents same-card leakage across folds
 
 **Legacy scripts** (in `old_versions/training/`):
 - `train_tiered_model.R` - Original 3-tier system (~57% exact)
@@ -385,14 +405,62 @@ See [ios_app/README.md](ios_app/README.md) for detailed setup instructions.
 - 📝 Detailed grading notes (centering, corners, surface)
 - ⚙️ Configurable API endpoint
 
+## Data Management & Analysis
+
+### Data Manifest (Leakage Prevention)
+
+Create a manifest with deduplication and grouped CV splits:
+
+```bash
+python scripts/data_management/create_data_manifest.py \
+    --data-dir data/training \
+    --output data/data_manifest.csv \
+    --create-splits
+```
+
+**Features:**
+- Perceptual hashing for near-duplicate detection
+- Base ID extraction for front/back pairing
+- CV groups to prevent same-card leakage
+- Card type detection (Pokemon, sports, etc.)
+
+### Confusion Analysis (Targeted Collection)
+
+After running predictions, analyze errors for targeted improvement:
+
+```bash
+python scripts/analysis/confusion_analysis.py \
+    --predictions results/predictions.csv \
+    --output analysis/
+```
+
+**Outputs:**
+- Confusion matrix heatmap
+- Per-grade accuracy breakdown
+- Most confused grade pairs
+- Data collection recommendations
+
+### Test-Time Augmentation (TTA)
+
+For higher accuracy predictions (adds ~1-2% exact match):
+
+```bash
+# Extract features with TTA
+python scripts/feature_extraction/extract_features_tta.py \
+    --image card.jpg --output-csv features_tta.csv
+
+# Or in R
+source("Prediction_New/predict_ensemble.R")
+result <- predict_grade_ensemble("card.jpg", use_tta = TRUE)
+```
+
 ## Future Enhancements
 
-1. **Cross-model weighted consensus voting** - Combine multiple model predictions
-2. **Active learning** - Flag uncertain predictions for human review
-3. **Card-specific models** - Specialized models for Pokemon, sports, etc.
-4. **Edge-to-border contrast ratio** - Border edge sharpness measurement
-5. **Holographic surface analysis** - Detect holo pattern wear
-6. **Core ML model** - Offline iOS predictions without server
+1. **Back-of-card dataset** - Paired front/back images for penalty system
+2. **Active learning loop** - Flag low-confidence samples for review
+3. **Card-type specialists** - Pokemon, sports, TCG-specific models
+4. **Multi-crop inference** - Additional TTA with strategic crops
+5. **Core ML model** - Offline iOS predictions without server
 
 ## Requirements
 
