@@ -2,22 +2,43 @@
 
 AI-powered PSA card grading prediction system using ensemble learning with adaptive features.
 
-## Current Status
+## Validated Performance (5-Fold CV, Leakage-Free)
 
-**Baseline Performance** (from previous cross-validation):
-- Exact Match: ~57%
-- Within 1 Grade: ~74%
-- Within 2 Grades: ~87%
+**Latest Cross-Validation Results** (8,725 deduplicated images, grouped by visual similarity):
 
-**Target**: 60%+ exact match accuracy
+| Metric | Performance |
+|--------|-------------|
+| **Exact Match** | **10.3%** (SD: 1.0%) |
+| **Within 1 Grade** | **29.2%** (SD: 0.8%) |
+| **Within 2 Grades** | **46.9%** (SD: 0.9%) |
 
-**New Improvements Implemented** (pending validation):
-- 5-model ensemble with diverse configurations
-- Confusion-pair specialists (6↔7, 7↔8, 8↔9, 9↔10)
-- Ordinal-aware training (cost-sensitive loss)
-- Temperature calibration per tier
-- Test-time augmentation (TTA)
-- Data manifest with deduplication and leakage prevention
+### Per-Grade Exact Match Accuracy
+
+| Grade | Accuracy | Support | Notes |
+|-------|----------|---------|-------|
+| PSA 1 | 8.0% | 465 | |
+| PSA 2 | 0.9% | 583 | Low - often confused with 1,3 |
+| PSA 3 | 1.8% | 892 | Low - mid grades challenging |
+| PSA 4 | 17.5% | 800 | Best low-mid grade |
+| PSA 5 | 7.0% | 569 | |
+| PSA 6 | 15.6% | 1400 | Good - largest class |
+| PSA 7 | 14.1% | 1128 | Good |
+| PSA 8 | 7.5% | 901 | Confused with 7,9 |
+| PSA 9 | 9.2% | 1032 | Confused with 8,10 |
+| PSA 10 | 12.6% | 955 | |
+
+**Key Insight**: Previous ~97% accuracy was due to data leakage (near-duplicate images in train/test). The above represents true generalization on unseen cards.
+
+### Components & Their Status
+
+| Component | Status | Purpose |
+|-----------|--------|---------|
+| 5-Model Ensemble | ✅ Active | Diverse model voting |
+| Confusion-Pair Specialists | ✅ Active | 6↔7, 7↔8, 8↔9, 9↔10 |
+| Ordinal Loss | ✅ Active | Prefer adjacent errors |
+| Temperature Calibration | ✅ Active | Per-tier calibration |
+| Data Manifest + Deduplication | ✅ Active | 1,070 near-dupes removed |
+| Grouped CV (phash_group) | ✅ Active | Prevents leakage |
 
 ## Quick Start
 
@@ -260,12 +281,20 @@ See [ios_app/README.md](ios_app/README.md) for setup details.
 - [x] LLM visual auditor integration
 - [x] iOS mobile app
 
-### Planned 📋
+### High Priority (Likely +5-15% accuracy) 📋
 
-- [ ] Back-of-card dataset (paired front/back images)
-- [ ] Card-type specialists (Pokemon, sports, etc.)
+- [ ] **CNN Feature Fusion**: Concatenate MobileNetV2 embeddings (1,280 dims) with engineered features
+- [ ] **Back-of-card dataset**: Paired front/back images for penalty system
+- [ ] **Card-type specialists**: Pokemon, sports, modern vs vintage
+- [ ] **More training data**: Current dataset may have too much visual variance
+- [ ] **Higher resolution analysis**: Extract corner features at higher resolution
+
+### Medium Priority 📋
+
 - [ ] Active learning loop (flag uncertain samples)
 - [ ] Core ML model (offline iOS predictions)
+- [ ] Gradient-based saliency maps (explainability)
+- [ ] Fine-tuned CNN backbone on grading task
 
 ## Requirements
 

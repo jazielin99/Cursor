@@ -91,10 +91,11 @@ if (use_manifest) {
   cat("Filtering to clean manifest images...\n")
   df <- df[df$path %in% manifest$path, , drop = FALSE]
   
-  # Add cv_group from manifest
-  manifest_groups <- manifest[, c("path", "cv_group")]
+  # Add cv_group and phash_group from manifest
+  manifest_groups <- manifest[, c("path", "cv_group", "phash_group")]
   df <- merge(df, manifest_groups, by = "path", all.x = TRUE)
-  cat("  Images after filtering:", nrow(df), "\n\n")
+  cat("  Images after filtering:", nrow(df), "\n")
+  cat("  Unique phash groups:", length(unique(df$phash_group)), "\n\n")
 }
 
 # Prepare data
@@ -497,8 +498,33 @@ cat("  Saved: models/ensemble_model.rds\n\n")
 
 cat("Running grouped 5-fold cross-validation...\n\n")
 
-# Create grouped folds
-if (use_manifest && "cv_group" %in% colnames(df)) {
+# Create grouped folds using phash_group (groups visually similar images)
+# This prevents near-duplicate images from appearing in both train and test
+if (use_manifest && "phash_group" %in% colnames(df)) {
+  cat("Using phash_group for CV splits (prevents near-duplicate leakage)...\n")
+  
+  # Create a lookup table for group -> fold
+  valid_groups <- unique(na.omit(df$phash_group))
+  set.seed(42)
+  fold_lookup <- data.frame(
+    phash_group = valid_groups,
+    fold = sample(rep(1:5, length.out = length(valid_groups))),
+    stringsAsFactors = FALSE
+  )
+  
+  # Merge to assign folds
+  df <- merge(df, fold_lookup, by = "phash_group", all.x = TRUE, suffixes = c("", "_new"))
+  
+  # Handle any NA folds (from missing groups)
+  na_folds <- is.na(df$fold)
+  if (any(na_folds)) {
+    set.seed(42)
+    df$fold[na_folds] <- sample(1:5, sum(na_folds), replace = TRUE)
+  }
+  
+  cat("  Unique phash groups:", length(valid_groups), "\n")
+  cat("  Rows with valid groups:", sum(!na_folds), "\n")
+} else if (use_manifest && "cv_group" %in% colnames(df)) {
   groups <- unique(df$cv_group)
   set.seed(42)
   group_folds <- sample(rep(1:5, length.out = length(groups)))
