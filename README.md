@@ -4,7 +4,7 @@ An AI-powered PSA card grading prediction system using a **tiered** architecture
 
 ## Performance Summary (Latest Evaluation)
 
-Cross-validation results on 8,123 images:
+Cross-validation results on 8,123 images (evaluation subset; repository may contain more training images):
 
 | Metric | Accuracy |
 |---|---:|
@@ -26,16 +26,16 @@ Cross-validation results on 8,123 images:
 ```
 ├── data/
 │   └── training/           # Training images organized by grade
-│       ├── PSA_1/          # 386 images
+│       ├── PSA_1/          # 985 images
 │       ├── PSA_1.5/        # 160 images
-│       ├── PSA_2/          # 383 images
-│       ├── PSA_3/          # 415 images
-│       ├── PSA_4/          # 1,837 images
+│       ├── PSA_2/          # 750 images
+│       ├── PSA_3/          # 1,235 images
+│       ├── PSA_4/          # 1,840 images
 │       ├── PSA_5/          # 1,066 images
-│       ├── PSA_6/          # 2,063 images
-│       ├── PSA_7/          # 1,722 images
-│       ├── PSA_8/          # 1,736 images
-│       ├── PSA_9/          # 1,990 images
+│       ├── PSA_6/          # 2,089 images
+│       ├── PSA_7/          # 2,158 images
+│       ├── PSA_8/          # 1,737 images
+│       ├── PSA_9/          # 1,991 images
 │       └── PSA_10/         # 1,759 images
 │
 ├── models/                 # Trained models and extracted features
