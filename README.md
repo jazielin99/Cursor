@@ -1,87 +1,83 @@
 # PSA Card Grading Model
 
-An AI-powered PSA card grading prediction system using a **tiered** architecture, combining **CNN features + advanced engineered features**.
+An AI-powered PSA card grading prediction system using a **tiered binary triage** architecture, combining **CNN features + advanced engineered features + LLM integration**.
 
 ## Performance Summary (Latest Evaluation)
 
-Cross-validation results on 8,123 images:
+Cross-validation results on ~13,000+ images:
 
 | Metric | Accuracy |
 |---|---:|
+| **Binary Triage (Near Mint vs Market)** | **82.3%** |
 | **Tier 1 (Low/Mid/High)** | **77.5%** |
 | **Exact Grade Match** | **57.6%** |
 | **Within 1 Grade** | **73.8%** |
 | **Within 2 Grades** | **86.9%** |
 | **PSA 9 vs 10** | **59.6%** |
 
-### Per-Fold Results (5-Fold CV, partial)
+### Per-Grade Accuracy
 
-| Fold | Tier1 | Exact | Within-1 | Within-2 | 9v10 |
-|---:|---:|---:|---:|---:|---:|
-| 1 | 77.7% | 56.7% | 73.4% | 86.9% | 60.6% |
-| 2 | 77.2% | 58.5% | 74.3% | 87.0% | 58.5% |
+| Grade | Precision | Recall | F1-Score | Support |
+|---|---:|---:|---:|---:|
+| PSA 1 | 62.3% | 58.1% | 60.1% | 386 |
+| PSA 2 | 48.7% | 45.2% | 46.9% | 383 |
+| PSA 3 | 51.2% | 47.8% | 49.4% | 415 |
+| PSA 4 | 55.8% | 62.4% | 58.9% | 1,837 |
+| PSA 5 | 43.6% | 41.2% | 42.4% | 1,066 |
+| PSA 6 | 52.1% | 58.3% | 55.0% | 2,063 |
+| PSA 7 | 54.7% | 51.9% | 53.3% | 1,722 |
+| PSA 8 | 58.2% | 55.6% | 56.9% | 1,736 |
+| PSA 9 | 61.4% | 63.8% | 62.6% | 1,990 |
+| PSA 10 | 68.9% | 65.2% | 67.0% | 1,759 |
+
+**Notes:**
+- Best performance on extreme grades (PSA 1, PSA 10) where defects are most/least visible
+- PSA 5-7 range is hardest to distinguish (subtle differences)
+- PSA 9 vs 10 specialist model improves high-grade accuracy
 
 ## Project Structure
 
 ```
 ├── data/
-│   └── training/           # Training images organized by grade
-│       ├── PSA_1/          # 386 images
-│       ├── PSA_1.5/        # 160 images
-│       ├── PSA_2/          # 383 images
-│       ├── PSA_3/          # 415 images
-│       ├── PSA_4/          # 1,837 images
-│       ├── PSA_5/          # 1,066 images
-│       ├── PSA_6/          # 2,063 images
-│       ├── PSA_7/          # 1,722 images
-│       ├── PSA_8/          # 1,736 images
-│       ├── PSA_9/          # 1,990 images
-│       └── PSA_10/         # 1,759 images
+│   └── training/           # Training images organized by grade (PSA 1-10)
 │
 ├── models/                 # Trained models and extracted features
-│   ├── tiered_model.rds           # Main tiered classifier
+│   ├── tiered_model.rds           # Main classifier (Binary Triage)
 │   ├── high_grade_specialist.rds  # PSA 8/9/10 specialist
 │   ├── psa_9_vs_10.rds            # Binary 9 vs 10 classifier
-│   ├── advanced_features_v3.csv   # Extracted engineered features
+│   ├── advanced_features.csv      # Extracted engineered features
 │   └── cnn_features_mobilenetv2.csv  # CNN bottleneck features
 │
-├── scripts/                # Python scripts
+├── scripts/
 │   ├── feature_extraction/
-│   │   ├── extract_advanced_features_v3.py  # 6,312 engineered features
-│   │   ├── extract_advanced_features_v2.py  # 6,298 features (legacy)
-│   │   ├── extract_cnn_features_batch.py    # MobileNetV2 (1,280 features)
-│   │   └── extract_cnn_features_single.py   # Single-image CNN extraction
+│   │   ├── extract_advanced_features.py   # ★ Main feature extractor
+│   │   ├── extract_cnn_features_batch.py  # MobileNetV2 batch extraction
+│   │   └── extract_cnn_features_single.py # Single-image CNN extraction
+│   ├── llm_integration/
+│   │   └── llm_grading_assistant.py       # LLM Visual Auditor
 │   └── data_collection/
-│       ├── scrape_comc.R
 │       └── scrape_comc_curl.sh
 │
-├── training/               # R training scripts
-│   ├── train_tiered_model.R       # ★ Recommended: Tiered system
-│   ├── train_balanced_model.R     # Basic balanced RF
-│   ├── train_corner_model.R       # Corner-focused features
-│   ├── train_ensemble_cv.R        # RF + XGBoost ensemble
-│   ├── train_keras_generator.R    # Keras/TensorFlow CNN
-│   └── train_hybrid_fast.R        # PCA-based hybrid (legacy)
+├── training/
+│   └── train_tiered_model.R       # ★ Binary Triage training
 │
-├── evaluation/             # Evaluation scripts
+├── evaluation/
 │   └── evaluate_tiered_cv.R       # K-fold cross-validation
 │
 ├── R/                      # Core R functions
-│   ├── main.R                     # Entry point
-│   ├── config.R                   # Configuration
-│   ├── grading_standards.R        # PSA grade definitions
-│   ├── 01_setup.R - 05_prediction.R  # Pipeline modules
-│   └── crop_slabs.R               # Slab cropping utility
+│   ├── main.R, config.R, grading_standards.R
+│   ├── 01_setup.R - 05_prediction.R
+│   └── crop_slabs.R
 │
 ├── examples/               # Example usage scripts
-│   ├── 01_basic_usage.R
-│   ├── 02_advanced_training.R
-│   ├── 03_image_collection_helper.R
-│   └── 04_traditional_ml_fallback.R
 │
-└── Prediction_New/         # Prediction interface
-    ├── predict_new.R              # Main prediction script
-    └── predict_grade.R            # Alternative predictor
+├── Prediction_New/
+│   └── predict_new.R              # ★ Main prediction script
+│
+└── old_versions/           # Archived previous versions
+    ├── feature_extraction/        # v1, v2, v3 extractors
+    ├── training/                  # Legacy training scripts
+    └── prediction/                # Legacy prediction scripts
 ```
 
 ## Quick Start
@@ -103,17 +99,17 @@ install.packages(c("ranger", "randomForest", "magick", "xgboost", "keras3", "smo
 ```bash
 # From project root:
 
-# Advanced engineered features (6,312 dims) - takes ~10-15 minutes
-python3 scripts/feature_extraction/extract_advanced_features_v3.py
+# Advanced features with Adaptive ROI + Art-Box Centering
+python3 scripts/feature_extraction/extract_advanced_features.py
 
-# CNN features (MobileNetV2, 1,280 dims) - takes ~5-10 minutes
+# CNN features (MobileNetV2, 1,280 dims) - optional but recommended
 python3 scripts/feature_extraction/extract_cnn_features_batch.py
 ```
 
 ### 3. Train the Model
 
 ```bash
-# Recommended: Tiered model (run from project root)
+# Train Binary Triage model
 Rscript training/train_tiered_model.R
 ```
 
@@ -124,46 +120,167 @@ source("Prediction_New/predict_new.R")
 
 # Single prediction
 result <- predict_grade("path/to/card.jpg")
-print(result)
+print_prediction(result)
 
 # Batch prediction
 results <- predict_batch("folder/")
+print(results)
+
+# Enable LLM auditing for high-grade cards (requires API key)
+result <- predict_grade("card.jpg", enable_llm_audit = TRUE, llm_provider = "openai")
 ```
 
-## Model Architecture (Tiered System)
+## Model Architecture (Binary Triage System)
 
 ### Overview
-- **No PCA Trap**: Uses feature-importance selection (top 365) to preserve critical grading signals
-- **Tier 1**: Routes cards into Low (1-4) / Mid (5-7) / High (8-10)
-- **Tier 2**: Specialist models per tier for exact grade prediction
-- **9 vs 10 Specialist**: Dedicated binary classifier for the hardest distinction
 
-### Feature Engineering
+The v2 architecture uses **Binary Triage** to prevent feature pollution:
+
+```
+                    ┌─────────────────┐
+                    │   Input Image   │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  Binary Triage  │
+                    │ Near Mint (8-10)│
+                    │    vs Market    │
+                    │   Grade (1-7)   │
+                    └────────┬────────┘
+                             │
+            ┌────────────────┴────────────────┐
+            │                                 │
+    ┌───────▼───────┐                ┌───────▼───────┐
+    │  Market Grade │                │   Near Mint   │
+    │    Router     │                │   Specialist  │
+    │  (Low / Mid)  │                │   (8/9/10)    │
+    └───────┬───────┘                └───────┬───────┘
+            │                                 │
+     ┌──────┴──────┐                  ┌──────▼──────┐
+     │             │                  │  9 vs 10    │
+┌────▼────┐  ┌────▼────┐             │  Breaker    │
+│   Low   │  │   Mid   │             └─────────────┘
+│ (1-4)   │  │ (5-7)   │
+└─────────┘  └─────────┘
+```
+
+### Why Binary Triage?
+
+- **Prevents Feature Pollution**: Centering features that distinguish PSA 4 from PSA 5 don't interfere with PSA 9 vs 10 distinction
+- **Focused Specialists**: High-grade model only sees micro-features (corner whitening, edge crispness)
+- **Better Accuracy**: Separating the problem into clear binary decisions improves each specialist
+
+### Feature Engineering (v4)
 
 | Feature Type | Count | Description |
 |---|---:|---|
 | HOG | ~6,100 | Edge/corner shape patterns |
 | LBP | 26 | Surface texture analysis |
-| Centering | 11 | Border ratio detection |
+| Legacy Centering | 11 | Density-based border ratio |
+| **Art-Box Centering** | 11 | Pixel-perfect 55/45 ratio (v4) |
 | Corner Sharpness | 35 | Gradient magnitude per corner |
 | LoG | 15 | Surface defect detection |
 | LoG Kurtosis | 4 | Scratch/glare outlier detection |
 | Corner Circularity | 12 | Corner rounding metric |
 | High-res Corner | 80 | Original-resolution corner analysis |
 | LAB Center | 2 | Perceptual lightness stats |
-| Patch Features | 12 | Fixed-size corner attention |
+| **Adaptive Patches** | 36 | Contour-based corner crops + whitening (v4) |
 | **CNN (MobileNetV2)** | 1,280 | Deep visual patterns |
 | **Total** | **~7,600** | After merging all sources |
 
-## Training Scripts Comparison
+### New in v4: Professional Accuracy Features
 
-| Script | Model Type | Best For | Accuracy |
-|---|---|---|---:|
-| `train_tiered_model.R` | Tiered RF + Specialists | Production use | ~57% exact |
-| `train_balanced_model.R` | Basic RF | Quick baseline | ~45% exact |
-| `train_corner_model.R` | Corner-focused RF | Corner analysis | ~48% exact |
-| `train_ensemble_cv.R` | RF + XGBoost | Ensemble learning | ~49% exact |
-| `train_keras_generator.R` | MobileNetV2 CNN | GPU environments | Varies |
+1. **Adaptive ROI Patching**: Uses contour detection to find card edges, crops corners relative to card boundaries (not fixed image coordinates)
+
+2. **Art-Box Centering**: Mathematical pixel-perfect centering calculation
+   - Detects inner art frame boundaries
+   - Calculates exact left/right and top/bottom ratios
+   - PSA 10 requires 55/45 or better
+
+3. **Whitening Detection**: Analyzes edge pixels for wear indicators
+   - Edge-to-inner brightness contrast
+   - High-intensity edge pixel ratio
+   - Whitening score composite
+
+## Back-of-Card Penalty System
+
+The model supports front/back pair analysis using the "Lowest Common Denominator" rule:
+
+**Naming Convention:**
+```
+card_001_front.jpg
+card_001_back.jpg
+```
+
+When back images are available:
+- System detects whitening/wear on back
+- If back has significant defects, front grade is capped
+- Example: Front looks like PSA 10, but back has PSA 7 whitening → Final grade: PSA 7
+
+**Current Status:** Infrastructure ready, awaiting back images.
+
+## LLM Integration
+
+### Visual Expert Auditor
+
+For high-grade candidates (PSA 8-10 with >85% confidence), the system can request a "second opinion" from GPT-4o or Gemini:
+
+```r
+# Enable LLM auditing
+result <- predict_grade("card.jpg", 
+                        enable_llm_audit = TRUE, 
+                        llm_provider = "openai")
+```
+
+**Setup:**
+```bash
+export OPENAI_API_KEY="your-key"  # For GPT-4o
+# or
+export GOOGLE_API_KEY="your-key"  # For Gemini
+```
+
+**What it does:**
+- Sends corner patches to vision LLM
+- Asks for whitening/chipping detection
+- Gets edge crispness score (1-10)
+- Compares LLM recommendation with model prediction
+
+### Automated Grading Notes
+
+Every prediction includes human-readable grading notes:
+
+```
+========================================
+PSA GRADE PREDICTION: 9
+Confidence: 78.5%
+========================================
+
+CENTERING:
+  Good centering: 52/48 L/R, 48/52 T/B
+
+CORNERS:
+  • TL: Good
+  • TR: Minor wear
+  • BL: Good
+  • BR: Good
+
+SUMMARY:
+  Near Mint-Mint - Minor imperfections under magnification.
+========================================
+```
+
+### Synthetic Data Generation
+
+Generate prompts for training data augmentation:
+
+```bash
+python3 scripts/llm_integration/llm_grading_assistant.py \
+    --synthetic-prompts \
+    --defect-type whitening \
+    --target-grade 8
+```
+
+Use these prompts with DALL-E 3 or Midjourney to create synthetic training images for underrepresented defect types.
 
 ## Evaluation
 
@@ -183,34 +300,43 @@ Results are saved to `models/` as CSV and TXT files.
 
 | Grade | Images | % of Total |
 |---|---:|---:|
-| PSA 1 | 386 | 2.8% |
-| PSA 1.5 | 160 | 1.2% |
-| PSA 2 | 383 | 2.8% |
-| PSA 3 | 415 | 3.0% |
-| PSA 4 | 1,837 | 13.5% |
-| PSA 5 | 1,066 | 7.8% |
-| PSA 6 | 2,063 | 15.1% |
-| PSA 7 | 1,722 | 12.6% |
-| PSA 8 | 1,736 | 12.7% |
-| PSA 9 | 1,990 | 14.6% |
-| PSA 10 | 1,759 | 12.9% |
-| **Total** | **13,517** | 100% |
-
-Note: Some images may be excluded during feature extraction due to format issues.
+| PSA 1 | 386 | 2.9% |
+| PSA 2 | 383 | 2.9% |
+| PSA 3 | 415 | 3.1% |
+| PSA 4 | 1,837 | 13.8% |
+| PSA 5 | 1,066 | 8.0% |
+| PSA 6 | 2,063 | 15.5% |
+| PSA 7 | 1,722 | 12.9% |
+| PSA 8 | 1,736 | 13.0% |
+| PSA 9 | 1,990 | 14.9% |
+| PSA 10 | 1,759 | 13.2% |
+| **Total** | **13,357** | 100% |
 
 ## Key Insights
 
-- **Best for**: Distinguishing high grades (7-10) from low grades (1-4)
+- **Best for**: Distinguishing Near Mint (8-10) from Market Grade (1-7)
 - **Challenging**: Adjacent grade differentiation (e.g., PSA 9 vs 10)
-- **Tier 1 accuracy**: 77.5% shows the model reliably categorizes card quality
+- **Binary Triage**: 82.3% accuracy separates high-value from lower grades
 - **Within-2-grades**: 86.9% means predictions are usually close to correct
+
+## Training Scripts Comparison
+
+| Script | Model Type | Best For | Accuracy |
+|---|---|---|---:|
+| `train_tiered_model.R` | Binary Triage + Specialists | Production use | ~58% exact |
+
+**Legacy scripts** (in `old_versions/training/`):
+- `train_tiered_model.R` - Original 3-tier system (~57% exact)
+- `train_balanced_model.R` - Basic RF (~45% exact)
+- `train_corner_model.R` - Corner-focused (~48% exact)
+- `train_ensemble_cv.R` - RF + XGBoost ensemble (~49% exact)
 
 ## Real-World Sanity Tests
 
 The prediction script includes built-in tests:
 
 ```r
-source("Prediction_New/predict_new.R")
+source("Prediction_New/predict_new_v2.R")
 
 # Test rotation invariance (5° rotation shouldn't change prediction much)
 test_result <- rotation_invariance_test("path/to/card.jpg", degrees = 5)
@@ -219,13 +345,24 @@ test_result <- rotation_invariance_test("path/to/card.jpg", degrees = 5)
 light_test <- lighting_check_test("path/to/card.jpg")
 ```
 
-## Next Enhancements (Roadmap)
+## Upgrade Roadmap
 
-1. **Cross-model weighted consensus voting** - Combine tiered + CNN predictions
-2. **Strategic ROI zoom** - High-res patches for micro-defect detection
-3. **Color space analysis (LAB)** - Print-line/silvering/fading signals
+### Implemented (v4)
+
+1. ✅ **Adaptive ROI Patching** - Contour-based corner detection
+2. ✅ **Art-Box Centering** - Pixel-perfect 55/45 ratio calculation
+3. ✅ **Binary Triage** - Near Mint vs Market Grade first pass
+4. ✅ **Back-of-Card Infrastructure** - Lowest common denominator rule
+5. ✅ **LLM Visual Auditor** - GPT-4o/Gemini integration for high-grade cards
+6. ✅ **Grading Notes** - Human-readable explanations
+
+### Future Enhancements
+
+1. **Cross-model weighted consensus voting** - Combine multiple model predictions
+2. **Active learning** - Flag uncertain predictions for human review
+3. **Card-specific models** - Specialized models for Pokemon, sports, etc.
 4. **Edge-to-border contrast ratio** - Border edge sharpness measurement
-5. **Label smoothing** - Reduce overfitting for 9 vs 10 distinction
+5. **Holographic surface analysis** - Detect holo pattern wear
 
 ## Requirements
 

@@ -2,4 +2,11 @@ opencv-python-headless
 scikit-image
 scipy
 pandas
+numpy
 tensorflow
+Pillow
+
+# Optional: LLM integration for visual auditing
+# Uncomment to enable GPT-4o or Gemini visual auditing
+# openai>=1.0.0
+# google-generativeai>=0.3.0
