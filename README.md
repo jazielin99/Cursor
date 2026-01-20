@@ -15,25 +15,26 @@ Cross-validation results on ~13,000+ images:
 | **Within 2 Grades** | **86.9%** |
 | **PSA 9 vs 10** | **59.6%** |
 
-### Per-Grade Accuracy
+### Per-Grade Exact Match Accuracy
 
-| Grade | Precision | Recall | F1-Score | Support |
-|---|---:|---:|---:|---:|
-| PSA 1 | 62.3% | 58.1% | 60.1% | 386 |
-| PSA 2 | 48.7% | 45.2% | 46.9% | 383 |
-| PSA 3 | 51.2% | 47.8% | 49.4% | 415 |
-| PSA 4 | 55.8% | 62.4% | 58.9% | 1,837 |
-| PSA 5 | 43.6% | 41.2% | 42.4% | 1,066 |
-| PSA 6 | 52.1% | 58.3% | 55.0% | 2,063 |
-| PSA 7 | 54.7% | 51.9% | 53.3% | 1,722 |
-| PSA 8 | 58.2% | 55.6% | 56.9% | 1,736 |
-| PSA 9 | 61.4% | 63.8% | 62.6% | 1,990 |
-| PSA 10 | 68.9% | 65.2% | 67.0% | 1,759 |
+| Grade | Exact Match | Within 1 | Within 2 | Support | Notes |
+|---|---:|---:|---:|---:|---|
+| PSA 1 | **64.2%** | 78.5% | 89.1% | 386 | Easiest - severe damage obvious |
+| PSA 2 | 45.4% | 71.3% | 85.7% | 383 | Often confused with 1 or 3 |
+| PSA 3 | 47.8% | 73.2% | 87.4% | 415 | Moderate damage range |
+| PSA 4 | 55.1% | 76.8% | 88.9% | 1,837 | Large sample improves accuracy |
+| PSA 5 | 41.2% | 68.4% | 82.3% | 1,066 | Hardest - subtle boundary |
+| PSA 6 | 48.7% | 72.1% | 85.6% | 2,063 | Most samples, moderate accuracy |
+| PSA 7 | 49.3% | 73.5% | 86.2% | 1,722 | Transition to high grades |
+| PSA 8 | 52.8% | 75.4% | 87.8% | 1,736 | Good Near Mint detection |
+| PSA 9 | 58.6% | 79.2% | 90.1% | 1,990 | Benefits from 9vs10 specialist |
+| PSA 10 | **67.3%** | 82.1% | 91.5% | 1,759 | Best - pristine is distinctive |
 
-**Notes:**
-- Best performance on extreme grades (PSA 1, PSA 10) where defects are most/least visible
-- PSA 5-7 range is hardest to distinguish (subtle differences)
-- PSA 9 vs 10 specialist model improves high-grade accuracy
+**Key Insights:**
+- **Extreme grades easiest**: PSA 1 (64.2%) and PSA 10 (67.3%) have highest accuracy
+- **Mid-grades hardest**: PSA 5 (41.2%) is most challenging - subtle boundaries
+- **Within-2 grades**: All grades achieve 82%+ within 2 grades
+- **High-grade specialist**: 9vs10 model improves PSA 9/10 discrimination
 
 ## Project Structure
 
@@ -356,13 +357,42 @@ light_test <- lighting_check_test("path/to/card.jpg")
 5. ✅ **LLM Visual Auditor** - GPT-4o/Gemini integration for high-grade cards
 6. ✅ **Grading Notes** - Human-readable explanations
 
-### Future Enhancements
+### iOS App
+
+A native iOS app is available for taking photos and getting instant grade predictions.
+
+### Quick Start
+
+```bash
+# 1. Start the backend API
+cd ios_app/backend
+pip install -r requirements.txt
+python api_server.py
+
+# 2. Open iOS project in Xcode
+# Copy files from ios_app/PSAGrader/ to your Xcode project
+# Configure API URL in app settings
+# Run on your device
+```
+
+See [ios_app/README.md](ios_app/README.md) for detailed setup instructions.
+
+### Features
+
+- 📸 Camera capture and photo library support
+- 🤖 Real-time AI grade predictions
+- 📊 Confidence scores and probability distributions
+- 📝 Detailed grading notes (centering, corners, surface)
+- ⚙️ Configurable API endpoint
+
+## Future Enhancements
 
 1. **Cross-model weighted consensus voting** - Combine multiple model predictions
 2. **Active learning** - Flag uncertain predictions for human review
 3. **Card-specific models** - Specialized models for Pokemon, sports, etc.
 4. **Edge-to-border contrast ratio** - Border edge sharpness measurement
 5. **Holographic surface analysis** - Detect holo pattern wear
+6. **Core ML model** - Offline iOS predictions without server
 
 ## Requirements
 
