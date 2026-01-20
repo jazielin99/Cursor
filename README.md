@@ -198,11 +198,37 @@ Outputs:
 - `per_grade_accuracy.csv` - Breakdown by grade
 - `confusion_report.md` - Recommendations
 
+## Back-of-Card Setup
+
+The model supports paired front/back card images. To add back-of-card data:
+
+```bash
+# Folder structure is ready:
+data/
+├── training_front/    # Front images (existing)
+│   ├── PSA_1/
+│   ├── PSA_2/
+│   ...
+└── training_back/     # Back images (add your images here)
+    ├── PSA_1/
+    ├── PSA_2/
+    ...
+
+# After adding back images, extract features:
+python scripts/feature_extraction/extract_advanced_features.py \
+    --data-dir data/training_back \
+    --output-base models/advanced_features_back
+
+# The training script will automatically detect and use back features
+Rscript training/train_full_pipeline.R
+```
+
 ## Project Structure
 
 ```
 ├── data/
-│   ├── training/              # Training images (PSA_1 through PSA_10)
+│   ├── training_front/        # Front card images (PSA_1 through PSA_10)
+│   ├── training_back/         # Back card images (same structure)
 │   ├── data_manifest.csv      # Full manifest with duplicate flags
 │   └── data_manifest_clean.csv # Deduplicated images
 │
@@ -309,18 +335,24 @@ See [ios_app/README.md](ios_app/README.md) for setup details.
 - [x] Grouped CV (leakage prevention)
 - [x] LLM visual auditor integration
 - [x] iOS mobile app
+- [x] **Mobile web app** (Flask-based, works on any device)
+- [x] **CNN Feature Fusion** (MobileNetV2 1,280 dims + engineered features)
+- [x] **Back-of-card folder structure** (ready for paired images)
+- [x] **Card type tagging** (sports, tcg, unknown in manifest)
+- [x] **Cost-sensitive learning** (upweight hard classes)
+- [x] **SMOTE oversampling** for PSA 2, 5, 8
+- [x] **Uncertainty sampling** for active learning
+- [x] **Confusion analysis** with recommendations
 
-### High Priority (Likely +5-15% accuracy) 📋
+### High Priority (Next Steps) 📋
 
-- [ ] **CNN Feature Fusion**: Concatenate MobileNetV2 embeddings (1,280 dims) with engineered features
-- [ ] **Back-of-card dataset**: Paired front/back images for penalty system
-- [ ] **Card-type specialists**: Pokemon, sports, modern vs vintage
-- [ ] **More training data**: Current dataset may have too much visual variance
-- [ ] **Higher resolution analysis**: Extract corner features at higher resolution
+- [ ] **Balance hard class weights**: Current weights cause PSA 8 over-prediction
+- [ ] **Collect back-of-card images**: Place in `data/training_back/PSA_X/`
+- [ ] **Card-type specialists**: Separate models for sports vs TCG
+- [ ] **Review uncertain samples**: Use `scripts/analysis/uncertainty_sampling.py`
 
 ### Medium Priority 📋
 
-- [ ] Active learning loop (flag uncertain samples)
 - [ ] Core ML model (offline iOS predictions)
 - [ ] Gradient-based saliency maps (explainability)
 - [ ] Fine-tuned CNN backbone on grading task

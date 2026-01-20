@@ -36,3 +36,5 @@ Thumbs.db
 *.tmp
 *.bak
 models/ensemble_model.rds
+models/cnn_features.csv
+models/full_pipeline_model.rds
