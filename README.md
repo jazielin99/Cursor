@@ -1,51 +1,40 @@
 # PSA Card Grading Model
 
-AI-powered PSA card grading prediction system using ensemble learning with adaptive features.
+AI-powered PSA card grading prediction system using machine learning with advanced features.
 
 ## Model Performance (5-Fold Cross-Validation)
 
-**Balanced Ensemble Results** (10,288 images):
+**Python Model Results** (5,000 images):
 
 | Metric | Performance |
 |--------|-------------|
-| **Exact Match** | **53.4%** (SD: 1.1%) |
-| **Within 1 Grade** | **73.5%** |
-| **Within 2 Grades** | **84.9%** |
+| **Exact Match** | **54.7%** |
+| **Within 1 Grade** | **70.9%** |
+| **Within 2 Grades** | **84.1%** |
 
 ### Per-Grade Exact Match Accuracy
 
-| Grade | Accuracy | Correct/Total | vs Baseline | Notes |
-|-------|----------|---------------|-------------|-------|
-| PSA 1 | 68.7% | 575/837 | -1.9% | Strong - distinctive damage |
-| PSA 2 | **46.3%** | 302/652 | **+11.8%** | Improved with specialist |
-| PSA 3 | 63.8% | 720/1129 | -5.6% | Good |
-| PSA 4 | 67.0% | 647/966 | -7.4% | Strong |
-| PSA 5 | **45.2%** | 283/626 | **+18.2%** | Major improvement |
-| PSA 6 | 50.6% | 722/1428 | -6.3% | Moderate |
-| PSA 7 | 44.7% | 610/1365 | -2.4% | Moderate |
-| PSA 8 | **43.5%** | 439/1009 | **+14.8%** | Major improvement |
-| PSA 9 | 42.8% | 513/1199 | -7.4% | Confused with 8, 10 |
-| PSA 10 | 63.2% | 681/1077 | -2.1% | Strong |
-
-### Hard Class Improvements
-
-The balanced ensemble specifically targets PSA 2, 5, and 8 which were previously the worst performers:
-
-| Grade | Baseline | Improved | Change |
-|-------|----------|----------|--------|
-| PSA 2 | 34.5% | **46.3%** | **+11.8%** |
-| PSA 5 | 27.0% | **45.2%** | **+18.2%** |
-| PSA 8 | 28.7% | **43.5%** | **+14.8%** |
+| Grade | Accuracy | Correct/Total | Notes |
+|-------|----------|---------------|-------|
+| PSA 1 | 69.2% | 346/500 | Strong - distinctive damage |
+| PSA 2 | 62.0% | 310/500 | Good |
+| PSA 3 | 62.4% | 312/500 | Good |
+| PSA 4 | 71.6% | 358/500 | Strong |
+| PSA 5 | 52.2% | 261/500 | Moderate |
+| PSA 6 | 40.2% | 201/500 | Hard class - mid-grade boundary |
+| PSA 7 | 39.2% | 196/500 | Hard class - mid-grade boundary |
+| PSA 8 | 39.6% | 198/500 | Hard class - high-grade boundary |
+| PSA 9 | 41.8% | 209/500 | Confused with 8, 10 |
+| PSA 10 | 68.4% | 342/500 | Strong |
 
 ### Model Components
 
 | Component | Status | Purpose |
 |-----------|--------|---------|
-| Base Model | ✅ Active | 500 trees, good overall accuracy |
-| Specialist Model | ✅ Active | Upweighted hard classes (2, 5, 8) |
-| SMOTE Oversampling | ✅ Active | 1.5x synthetic samples for hard classes |
-| Confidence Blending | ✅ Active | Combines base + specialist predictions |
-| Advanced Features (v4) | ✅ Active | HOG, LBP, corners, centering |
+| Random Forest | ✅ Active | 500 trees, balanced class weights |
+| Advanced Features (v4) | ✅ Active | HOG, LBP, corners, centering, art-box |
+| Adaptive Corners | ✅ Active | Contour-based corner detection |
+| Art-Box Centering | ✅ Active | Pixel-perfect 55/45 ratio measurement |
 
 ## Quick Start
 
@@ -300,9 +289,21 @@ python app.py
 
 Features:
 - Camera capture or photo upload
-- Real-time grade predictions
+- Real-time grade predictions with tiered specialist model
 - Confidence scores and probability breakdown
 - Works on iOS, Android, and desktop
+
+### Retrain the Model
+
+```bash
+# Retrain with custom sample size
+python webapp/predictor.py --train --samples 300
+
+# Test prediction on a single image
+python webapp/predictor.py --image path/to/card.jpg
+```
+
+The model is saved to `models/psa_python_model.pkl`
 
 ## iOS App (Native)
 

@@ -8,8 +8,6 @@ import os
 import sys
 import json
 import uuid
-import subprocess
-import tempfile
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
@@ -24,89 +22,54 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 # Path to workspace root
 WORKSPACE_ROOT = Path(__file__).parent.parent
 
+# Add webapp to path for predictor import
+sys.path.insert(0, str(Path(__file__).parent))
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def run_prediction(image_path):
-    """Run R prediction script on image"""
-    predict_script = WORKSPACE_ROOT / 'Prediction_New' / 'predict_new.R'
-    
-    # Create a temporary R script that sources and runs prediction
-    r_code = f'''
-    setwd("{WORKSPACE_ROOT}")
-    .libPaths(c("~/R/library", .libPaths()))
-    suppressPackageStartupMessages(source("Prediction_New/predict_new.R"))
-    result <- predict_grade("{image_path}")
-    cat(jsonlite::toJSON(result, auto_unbox = TRUE))
-    '''
-    
+    """Run Python-based prediction on image using tiered model"""
     try:
-        result = subprocess.run(
-            ['Rscript', '-e', r_code],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=str(WORKSPACE_ROOT)
-        )
+        # Try tiered model first (better accuracy)
+        from tiered_predictor import predict_grade_tiered, get_tiered_model_path, GRADE_ORDER
         
-        if result.returncode != 0:
-            # Try simpler fallback prediction
-            return run_simple_prediction(image_path)
+        tiered_model_exists = get_tiered_model_path().exists()
         
-        # Parse JSON from stdout
-        output = result.stdout.strip()
-        # Find JSON in output (skip any warnings)
-        json_start = output.find('{')
-        if json_start >= 0:
-            return json.loads(output[json_start:])
+        if tiered_model_exists:
+            result = predict_grade_tiered(str(image_path))
         else:
-            return run_simple_prediction(image_path)
+            # Fall back to simple model
+            from predictor import predict_grade
+            result = predict_grade(str(image_path))
+        
+        # Ensure all values are JSON serializable
+        clean_result = {
+            'predicted_grade': str(result.get('predicted_grade', 'Unknown')),
+            'confidence': float(result.get('confidence', 0.0)),
+            'probabilities': {},
+            'method': str(result.get('method', 'unknown')),
+            'grade_name': str(result.get('grade_name', 'Unknown'))
+        }
+        
+        # Clean up probabilities
+        probs = result.get('probabilities', {})
+        for grade in GRADE_ORDER:
+            clean_result['probabilities'][grade] = float(probs.get(grade, 0.0))
+        
+        if 'error' in result:
+            clean_result['error'] = str(result['error'])
             
-    except subprocess.TimeoutExpired:
-        return {"error": "Prediction timed out", "predicted_grade": "Unknown"}
+        return clean_result
     except Exception as e:
-        return run_simple_prediction(image_path)
-
-def run_simple_prediction(image_path):
-    """Fallback: Run feature extraction and simple prediction"""
-    try:
-        # Extract features using Python
-        sys.path.insert(0, str(WORKSPACE_ROOT / 'scripts' / 'feature_extraction'))
-        from extract_advanced_features import extract_all_features
-        import numpy as np
-        import cv2
-        
-        img = cv2.imread(str(image_path))
-        if img is None:
-            return {"error": "Could not read image", "predicted_grade": "Unknown"}
-        
-        features = extract_all_features(img)
-        
-        # Load model if available
-        model_path = WORKSPACE_ROOT / 'models' / 'simple_rf_model.pkl'
-        if model_path.exists():
-            import pickle
-            with open(model_path, 'rb') as f:
-                model = pickle.load(f)
-            probs = model.predict_proba([features])[0]
-            grades = ['PSA_1', 'PSA_2', 'PSA_3', 'PSA_4', 'PSA_5', 
-                     'PSA_6', 'PSA_7', 'PSA_8', 'PSA_9', 'PSA_10']
-            pred_idx = np.argmax(probs)
-            return {
-                "predicted_grade": grades[pred_idx],
-                "confidence": float(probs[pred_idx]),
-                "probabilities": {g: float(p) for g, p in zip(grades, probs)}
-            }
-        else:
-            # No model - return placeholder
-            return {
-                "predicted_grade": "PSA_7",
-                "confidence": 0.5,
-                "note": "Model not loaded - using placeholder",
-                "features_extracted": len(features)
-            }
-    except Exception as e:
-        return {"error": str(e), "predicted_grade": "Unknown"}
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": str(e), 
+            "predicted_grade": "Unknown", 
+            "confidence": 0.0,
+            "probabilities": {f"PSA_{i}": 0.0 for i in range(1, 11)}
+        }
 
 @app.route('/')
 def index():
