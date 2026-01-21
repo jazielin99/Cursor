@@ -31,11 +31,36 @@ def allowed_file(filename):
 def run_prediction(image_path):
     """Run Python-based prediction on image"""
     try:
-        from predictor import predict_grade
+        from predictor import predict_grade, GRADE_ORDER
         result = predict_grade(str(image_path))
-        return result
+        
+        # Ensure all values are JSON serializable
+        clean_result = {
+            'predicted_grade': str(result.get('predicted_grade', 'Unknown')),
+            'confidence': float(result.get('confidence', 0.0)),
+            'probabilities': {},
+            'method': str(result.get('method', 'unknown')),
+            'grade_name': str(result.get('grade_name', 'Unknown'))
+        }
+        
+        # Clean up probabilities
+        probs = result.get('probabilities', {})
+        for grade in GRADE_ORDER:
+            clean_result['probabilities'][grade] = float(probs.get(grade, 0.0))
+        
+        if 'error' in result:
+            clean_result['error'] = str(result['error'])
+            
+        return clean_result
     except Exception as e:
-        return {"error": str(e), "predicted_grade": "Unknown", "confidence": 0.0}
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": str(e), 
+            "predicted_grade": "Unknown", 
+            "confidence": 0.0,
+            "probabilities": {f"PSA_{i}": 0.0 for i in range(1, 11)}
+        }
 
 @app.route('/')
 def index():

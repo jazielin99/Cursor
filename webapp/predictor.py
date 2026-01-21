@@ -194,14 +194,15 @@ def model_prediction(model, features: np.ndarray, feature_names: list) -> dict:
         
         prob_dict = {}
         for i, cls in enumerate(classes):
-            prob_dict[cls] = float(probs[i])
+            # Convert numpy string to Python string
+            prob_dict[str(cls)] = float(probs[i])
         
         # Ensure all grades are represented
         for grade in GRADE_ORDER:
             if grade not in prob_dict:
                 prob_dict[grade] = 0.0
         
-        predicted_grade = classes[np.argmax(probs)]
+        predicted_grade = str(classes[np.argmax(probs)])
         confidence = float(np.max(probs))
         
         return {
