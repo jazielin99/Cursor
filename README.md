@@ -318,7 +318,23 @@ The webapp uses a Python-based tiered specialist model with the following archit
 | **PSA 9 vs 10** | Dedicated classifier for high-grade distinction |
 | **Ordinal Smoothing** | Hierarchical penalty for neighbor grades |
 
-To retrain the tiered model with more data:
+#### Python Tiered Model Performance (Test Set)
+
+| Grade | Accuracy | Correct/Total |
+|-------|----------|---------------|
+| PSA 1 | 38.0% | 19/50 |
+| PSA 2 | 54.0% | 27/50 |
+| PSA 3 | 76.0% | 38/50 |
+| PSA 4 | 58.0% | 29/50 |
+| PSA 5 | 62.0% | 31/50 |
+| PSA 6 | 36.0% | 18/50 |
+| PSA 7 | 42.0% | 21/50 |
+| PSA 8 | 34.0% | 17/50 |
+| PSA 9 | 30.0% | 15/50 |
+| PSA 10 | 54.0% | 27/50 |
+| **Overall** | **48.4%** | **242/500** |
+
+#### Retrain the Tiered Model
 
 ```bash
 # Train with 200 samples per class (default)
