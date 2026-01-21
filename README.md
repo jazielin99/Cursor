@@ -1,46 +1,40 @@
 # PSA Card Grading Model
 
-AI-powered PSA card grading prediction system using ensemble learning with adaptive features.
+AI-powered PSA card grading prediction system using machine learning with advanced features.
 
 ## Model Performance (5-Fold Cross-Validation)
 
-**Current Results** (10,288 images, random splits):
+**Python Model Results** (5,000 images):
 
 | Metric | Performance |
 |--------|-------------|
-| **Exact Match** | **53.8%** (SD: 0.8%) |
-| **Within 1 Grade** | **73.3%** (SD: 0.7%) |
-| **Within 2 Grades** | **84.3%** (SD: 1.1%) |
+| **Exact Match** | **54.7%** |
+| **Within 1 Grade** | **70.9%** |
+| **Within 2 Grades** | **84.1%** |
 
 ### Per-Grade Exact Match Accuracy
 
 | Grade | Accuracy | Correct/Total | Notes |
 |-------|----------|---------------|-------|
-| PSA 1 | **70.6%** | 591/837 | Strong - distinctive damage |
-| PSA 2 | 34.5% | 225/652 | Often confused with 1, 3 |
-| PSA 3 | **69.4%** | 784/1129 | Strong |
-| PSA 4 | **74.4%** | 719/966 | Best performer |
-| PSA 5 | 27.0% | 169/626 | Hardest grade - middle zone |
-| PSA 6 | 56.9% | 813/1428 | Good - largest class |
-| PSA 7 | 47.1% | 643/1365 | Confused with 6, 8 |
-| PSA 8 | 28.7% | 290/1009 | Confused with 7, 9 |
-| PSA 9 | 50.2% | 602/1199 | Moderate |
-| PSA 10 | **65.3%** | 703/1077 | Strong - pristine is distinctive |
-
-### Key Insights
-
-- **Best performers**: PSA 4 (74.4%), PSA 1 (70.6%), PSA 3 (69.4%), PSA 10 (65.3%)
-- **Challenging grades**: PSA 5 (27.0%), PSA 8 (28.7%), PSA 2 (34.5%)
-- **Pattern**: Extreme grades (1-4, 10) are easier; middle grades (5-8) are harder
-- **73% within-1**: Most errors are only off by one grade
+| PSA 1 | 69.2% | 346/500 | Strong - distinctive damage |
+| PSA 2 | 62.0% | 310/500 | Good |
+| PSA 3 | 62.4% | 312/500 | Good |
+| PSA 4 | 71.6% | 358/500 | Strong |
+| PSA 5 | 52.2% | 261/500 | Moderate |
+| PSA 6 | 40.2% | 201/500 | Hard class - mid-grade boundary |
+| PSA 7 | 39.2% | 196/500 | Hard class - mid-grade boundary |
+| PSA 8 | 39.6% | 198/500 | Hard class - high-grade boundary |
+| PSA 9 | 41.8% | 209/500 | Confused with 8, 10 |
+| PSA 10 | 68.4% | 342/500 | Strong |
 
 ### Model Components
 
 | Component | Status | Purpose |
 |-----------|--------|---------|
-| Random Forest Ensemble | ✅ Active | 500 trees, 500 top features |
-| Advanced Features (v4) | ✅ Active | HOG, LBP, corners, centering |
-| 5-Fold CV | ✅ Active | Robust evaluation |
+| Random Forest | ✅ Active | 500 trees, balanced class weights |
+| Advanced Features (v4) | ✅ Active | HOG, LBP, corners, centering, art-box |
+| Adaptive Corners | ✅ Active | Contour-based corner detection |
+| Art-Box Centering | ✅ Active | Pixel-perfect 55/45 ratio measurement |
 
 ## Quick Start
 
@@ -193,11 +187,37 @@ Outputs:
 - `per_grade_accuracy.csv` - Breakdown by grade
 - `confusion_report.md` - Recommendations
 
+## Back-of-Card Setup
+
+The model supports paired front/back card images. To add back-of-card data:
+
+```bash
+# Folder structure is ready:
+data/
+├── training_front/    # Front images (existing)
+│   ├── PSA_1/
+│   ├── PSA_2/
+│   ...
+└── training_back/     # Back images (add your images here)
+    ├── PSA_1/
+    ├── PSA_2/
+    ...
+
+# After adding back images, extract features:
+python scripts/feature_extraction/extract_advanced_features.py \
+    --data-dir data/training_back \
+    --output-base models/advanced_features_back
+
+# The training script will automatically detect and use back features
+Rscript training/train_full_pipeline.R
+```
+
 ## Project Structure
 
 ```
 ├── data/
-│   ├── training/              # Training images (PSA_1 through PSA_10)
+│   ├── training_front/        # Front card images (PSA_1 through PSA_10)
+│   ├── training_back/         # Back card images (same structure)
 │   ├── data_manifest.csv      # Full manifest with duplicate flags
 │   └── data_manifest_clean.csv # Deduplicated images
 │
@@ -251,9 +271,43 @@ Rscript training/train_ensemble_model.R
 # - Saved to models/ensemble_cv_results.csv
 ```
 
-## iOS App
+## Web App (Mobile-Friendly)
 
-Mobile app for taking photos and getting predictions:
+Access the grader from any device with a browser:
+
+```bash
+# Install dependencies
+cd webapp
+pip install -r requirements.txt
+
+# Run the server
+python app.py
+
+# Access at http://localhost:5000
+# Or from phone: http://<your-ip>:5000
+```
+
+Features:
+- Camera capture or photo upload
+- Real-time grade predictions with tiered specialist model
+- Confidence scores and probability breakdown
+- Works on iOS, Android, and desktop
+
+### Retrain the Model
+
+```bash
+# Retrain with custom sample size
+python webapp/predictor.py --train --samples 300
+
+# Test prediction on a single image
+python webapp/predictor.py --image path/to/card.jpg
+```
+
+The model is saved to `models/psa_python_model.pkl`
+
+## iOS App (Native)
+
+Native iOS app for offline predictions:
 
 ```bash
 # Start backend
@@ -282,18 +336,24 @@ See [ios_app/README.md](ios_app/README.md) for setup details.
 - [x] Grouped CV (leakage prevention)
 - [x] LLM visual auditor integration
 - [x] iOS mobile app
+- [x] **Mobile web app** (Flask-based, works on any device)
+- [x] **CNN Feature Fusion** (MobileNetV2 1,280 dims + engineered features)
+- [x] **Back-of-card folder structure** (ready for paired images)
+- [x] **Card type tagging** (sports, tcg, unknown in manifest)
+- [x] **Cost-sensitive learning** (upweight hard classes)
+- [x] **SMOTE oversampling** for PSA 2, 5, 8
+- [x] **Uncertainty sampling** for active learning
+- [x] **Confusion analysis** with recommendations
 
-### High Priority (Likely +5-15% accuracy) 📋
+### High Priority (Next Steps) 📋
 
-- [ ] **CNN Feature Fusion**: Concatenate MobileNetV2 embeddings (1,280 dims) with engineered features
-- [ ] **Back-of-card dataset**: Paired front/back images for penalty system
-- [ ] **Card-type specialists**: Pokemon, sports, modern vs vintage
-- [ ] **More training data**: Current dataset may have too much visual variance
-- [ ] **Higher resolution analysis**: Extract corner features at higher resolution
+- [ ] **Balance hard class weights**: Current weights cause PSA 8 over-prediction
+- [ ] **Collect back-of-card images**: Place in `data/training_back/PSA_X/`
+- [ ] **Card-type specialists**: Separate models for sports vs TCG
+- [ ] **Review uncertain samples**: Use `scripts/analysis/uncertainty_sampling.py`
 
 ### Medium Priority 📋
 
-- [ ] Active learning loop (flag uncertain samples)
 - [ ] Core ML model (offline iOS predictions)
 - [ ] Gradient-based saliency maps (explainability)
 - [ ] Fine-tuned CNN backbone on grading task

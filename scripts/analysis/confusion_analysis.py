@@ -1,333 +1,182 @@
 #!/usr/bin/env python3
 """
-Confusion Analysis for Targeted Data Collection
+Confusion Analysis for PSA Card Grading Model
 
-Analyzes model errors to identify:
-1. Most confused grade pairs (e.g., 6↔7, 9↔10)
+Analyzes prediction errors to identify:
+1. Most confused grade pairs
 2. Per-grade accuracy breakdown
-3. Samples to prioritize for collection
-
-Outputs actionable recommendations for improving exact match accuracy.
-
-Usage:
-    python confusion_analysis.py --predictions predictions.csv --output analysis/
+3. Recommendations for targeted improvement
 """
-
-from __future__ import annotations
 
 import argparse
-from collections import defaultdict
-from pathlib import Path
-
+import os
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
+from pathlib import Path
 
-
-def load_predictions(csv_path: str) -> pd.DataFrame:
-    """Load predictions CSV with columns: path, true_grade, pred_grade, confidence"""
-    df = pd.read_csv(csv_path)
-    required_cols = ['true_grade', 'pred_grade']
-    for col in required_cols:
-        if col not in df.columns:
-            raise ValueError(f"Missing required column: {col}")
+def analyze_confusion(predictions_csv: str, output_dir: str):
+    """Analyze predictions and generate confusion report"""
     
-    # Convert grades to numeric
-    df['true_num'] = df['true_grade'].apply(lambda x: int(str(x).replace('PSA_', '')))
-    df['pred_num'] = df['pred_grade'].apply(lambda x: int(str(x).replace('PSA_', '')))
+    os.makedirs(output_dir, exist_ok=True)
     
-    return df
-
-
-def compute_confusion_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute confusion matrix from predictions."""
-    grades = sorted(df['true_num'].unique())
-    grade_labels = [f'PSA_{g}' for g in grades]
+    df = pd.read_csv(predictions_csv)
     
-    matrix = pd.DataFrame(0, index=grade_labels, columns=grade_labels)
+    # Get grades
+    grades = ['PSA_1', 'PSA_2', 'PSA_3', 'PSA_4', 'PSA_5', 
+              'PSA_6', 'PSA_7', 'PSA_8', 'PSA_9', 'PSA_10']
+    
+    # Ensure columns exist
+    if 'true_label' not in df.columns or 'pred_label' not in df.columns:
+        print("Error: CSV must have 'true_label' and 'pred_label' columns")
+        return
+    
+    # Build confusion matrix
+    n = len(grades)
+    confusion = np.zeros((n, n), dtype=int)
     
     for _, row in df.iterrows():
-        true = f"PSA_{row['true_num']}"
-        pred = f"PSA_{row['pred_num']}"
-        if true in matrix.index and pred in matrix.columns:
-            matrix.loc[true, pred] += 1
+        true = row['true_label']
+        pred = row['pred_label']
+        if true in grades and pred in grades:
+            i = grades.index(true)
+            j = grades.index(pred)
+            confusion[i, j] += 1
     
-    return matrix
-
-
-def identify_confusion_pairs(conf_matrix: pd.DataFrame, top_n: int = 10) -> list[dict]:
-    """
-    Identify most confused grade pairs.
-    
-    Returns list of dicts with:
-    - pair: (grade1, grade2)
-    - errors: number of misclassifications
-    - direction: which direction is more common
-    """
-    pairs = []
-    grades = conf_matrix.index.tolist()
-    
-    for i, g1 in enumerate(grades):
-        for g2 in grades[i+1:]:
-            errors_12 = conf_matrix.loc[g1, g2]  # g1 predicted as g2
-            errors_21 = conf_matrix.loc[g2, g1]  # g2 predicted as g1
-            total_errors = errors_12 + errors_21
-            
-            if total_errors > 0:
-                pairs.append({
-                    'pair': (g1, g2),
-                    'total_errors': total_errors,
-                    'errors_forward': errors_12,
-                    'errors_backward': errors_21,
-                    'direction': f"{g1}→{g2}" if errors_12 > errors_21 else f"{g2}→{g1}"
-                })
-    
-    # Sort by total errors
-    pairs.sort(key=lambda x: x['total_errors'], reverse=True)
-    return pairs[:top_n]
-
-
-def compute_per_grade_accuracy(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute accuracy metrics per grade."""
-    results = []
-    
-    for grade in sorted(df['true_num'].unique()):
-        grade_df = df[df['true_num'] == grade]
-        total = len(grade_df)
-        
-        if total == 0:
-            continue
-        
-        exact = (grade_df['pred_num'] == grade).sum()
-        within_1 = (abs(grade_df['pred_num'] - grade) <= 1).sum()
-        within_2 = (abs(grade_df['pred_num'] - grade) <= 2).sum()
-        
-        # Common misclassifications
-        errors = grade_df[grade_df['pred_num'] != grade]['pred_num'].value_counts()
-        top_error = errors.index[0] if len(errors) > 0 else None
-        top_error_count = errors.iloc[0] if len(errors) > 0 else 0
-        
-        results.append({
-            'grade': f'PSA_{grade}',
+    # Per-grade accuracy
+    per_grade = []
+    for i, grade in enumerate(grades):
+        total = confusion[i, :].sum()
+        correct = confusion[i, i]
+        acc = correct / total * 100 if total > 0 else 0
+        per_grade.append({
+            'grade': grade,
+            'correct': correct,
             'total': total,
-            'exact_match': exact,
-            'exact_pct': exact / total * 100,
-            'within_1': within_1,
-            'within_1_pct': within_1 / total * 100,
-            'within_2': within_2,
-            'within_2_pct': within_2 / total * 100,
-            'top_confusion': f'PSA_{top_error}' if top_error else None,
-            'top_confusion_count': top_error_count
+            'accuracy': acc
         })
     
-    return pd.DataFrame(results)
-
-
-def generate_collection_recommendations(
-    per_grade: pd.DataFrame,
-    confusion_pairs: list[dict],
-    current_counts: dict = None
-) -> list[str]:
-    """
-    Generate recommendations for targeted data collection.
-    """
-    recommendations = []
+    per_grade_df = pd.DataFrame(per_grade)
+    per_grade_df.to_csv(f"{output_dir}/per_grade_accuracy.csv", index=False)
     
-    # 1. Low accuracy grades need more samples
-    low_acc = per_grade[per_grade['exact_pct'] < 50].sort_values('exact_pct')
-    for _, row in low_acc.iterrows():
-        recommendations.append(
-            f"PRIORITY: Collect more {row['grade']} images "
-            f"(current accuracy: {row['exact_pct']:.1f}%, confused with {row['top_confusion']})"
-        )
+    # Find top confusion pairs
+    confusion_pairs = []
+    for i in range(n):
+        for j in range(n):
+            if i != j and confusion[i, j] > 0:
+                confusion_pairs.append({
+                    'true_grade': grades[i],
+                    'pred_grade': grades[j],
+                    'count': confusion[i, j],
+                    'pct_of_true': confusion[i, j] / confusion[i, :].sum() * 100 if confusion[i, :].sum() > 0 else 0
+                })
     
-    # 2. High-confusion pairs need boundary examples
-    for pair in confusion_pairs[:5]:
-        g1, g2 = pair['pair']
-        recommendations.append(
-            f"BOUNDARY: Collect {g1}/{g2} boundary cases "
-            f"({pair['total_errors']} errors, mainly {pair['direction']})"
-        )
+    confusion_pairs_df = pd.DataFrame(confusion_pairs)
+    confusion_pairs_df = confusion_pairs_df.sort_values('count', ascending=False)
+    confusion_pairs_df.to_csv(f"{output_dir}/confusion_pairs.csv", index=False)
     
-    # 3. High-grade distinctions are critical for value
-    high_grade_pairs = [p for p in confusion_pairs if 'PSA_9' in p['pair'] or 'PSA_10' in p['pair']]
-    if high_grade_pairs:
-        for pair in high_grade_pairs[:3]:
-            recommendations.append(
-                f"HIGH-VALUE: Focus on {pair['pair'][0]}/{pair['pair'][1]} distinction "
-                f"({pair['total_errors']} errors)"
-            )
+    # Save confusion matrix
+    confusion_df = pd.DataFrame(confusion, index=grades, columns=grades)
+    confusion_df.to_csv(f"{output_dir}/confusion_matrix.csv")
     
-    return recommendations
-
-
-def plot_confusion_matrix(conf_matrix: pd.DataFrame, output_path: str):
-    """Plot and save confusion matrix heatmap."""
-    plt.figure(figsize=(12, 10))
+    # Generate report
+    report = []
+    report.append("# Confusion Analysis Report\n\n")
     
-    # Normalize by row for better visualization
-    conf_norm = conf_matrix.div(conf_matrix.sum(axis=1), axis=0) * 100
+    # Overall stats
+    total = len(df)
+    correct = (df['true_label'] == df['pred_label']).sum()
+    report.append(f"## Overall Statistics\n")
+    report.append(f"- Total samples: {total}\n")
+    report.append(f"- Correct predictions: {correct} ({correct/total*100:.1f}%)\n")
+    report.append(f"- Errors: {total - correct} ({(total-correct)/total*100:.1f}%)\n\n")
     
-    sns.heatmap(conf_norm, annot=True, fmt='.1f', cmap='Blues',
-                xticklabels=conf_matrix.columns,
-                yticklabels=conf_matrix.index)
+    # Per-grade accuracy
+    report.append("## Per-Grade Accuracy\n\n")
+    report.append("| Grade | Accuracy | Correct/Total |\n")
+    report.append("|-------|----------|---------------|\n")
+    for row in per_grade:
+        report.append(f"| {row['grade']} | {row['accuracy']:.1f}% | {row['correct']}/{row['total']} |\n")
+    report.append("\n")
     
-    plt.title('Confusion Matrix (% of True Grade)', fontsize=14)
-    plt.xlabel('Predicted Grade', fontsize=12)
-    plt.ylabel('True Grade', fontsize=12)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    plt.close()
-
-
-def plot_accuracy_by_grade(per_grade: pd.DataFrame, output_path: str):
-    """Plot accuracy by grade."""
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # Top confusion pairs
+    report.append("## Top 15 Confusion Pairs\n\n")
+    report.append("These are the most common errors:\n\n")
+    report.append("| True Grade | Predicted | Count | % of True Class |\n")
+    report.append("|------------|-----------|-------|----------------|\n")
+    for _, row in confusion_pairs_df.head(15).iterrows():
+        report.append(f"| {row['true_grade']} | {row['pred_grade']} | {row['count']} | {row['pct_of_true']:.1f}% |\n")
+    report.append("\n")
     
-    x = range(len(per_grade))
-    width = 0.25
+    # Recommendations
+    report.append("## Recommendations\n\n")
     
-    ax.bar([i - width for i in x], per_grade['exact_pct'], width, label='Exact Match', color='#2ecc71')
-    ax.bar([i for i in x], per_grade['within_1_pct'], width, label='Within 1', color='#3498db')
-    ax.bar([i + width for i in x], per_grade['within_2_pct'], width, label='Within 2', color='#9b59b6')
+    # Find worst grades
+    worst_grades = per_grade_df.nsmallest(3, 'accuracy')
+    report.append("### 1. Focus on Low-Accuracy Grades\n\n")
+    for _, row in worst_grades.iterrows():
+        report.append(f"- **{row['grade']}** ({row['accuracy']:.1f}%): Collect more examples, review labels\n")
+    report.append("\n")
     
-    ax.set_xlabel('Grade', fontsize=12)
-    ax.set_ylabel('Accuracy (%)', fontsize=12)
-    ax.set_title('Accuracy by Grade', fontsize=14)
-    ax.set_xticks(x)
-    ax.set_xticklabels(per_grade['grade'], rotation=45)
-    ax.legend()
-    ax.set_ylim(0, 105)
+    # Find biggest confusion pairs
+    report.append("### 2. Train Confusion-Pair Specialists\n\n")
+    report.append("Add specialized models for these commonly confused pairs:\n\n")
+    top_pairs = confusion_pairs_df.head(5)
+    for _, row in top_pairs.iterrows():
+        report.append(f"- **{row['true_grade']} vs {row['pred_grade']}**: {row['count']} errors\n")
+    report.append("\n")
     
-    # Add 60% target line
-    ax.axhline(y=60, color='r', linestyle='--', alpha=0.5, label='60% Target')
+    # Adjacent vs distant errors
+    adjacent_errors = 0
+    distant_errors = 0
+    for _, row in confusion_pairs_df.iterrows():
+        true_num = int(row['true_grade'].replace('PSA_', ''))
+        pred_num = int(row['pred_grade'].replace('PSA_', ''))
+        if abs(true_num - pred_num) == 1:
+            adjacent_errors += row['count']
+        else:
+            distant_errors += row['count']
     
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    plt.close()
-
-
-def generate_report(
-    df: pd.DataFrame,
-    conf_matrix: pd.DataFrame,
-    per_grade: pd.DataFrame,
-    confusion_pairs: list[dict],
-    recommendations: list[str],
-    output_path: str
-):
-    """Generate markdown analysis report."""
-    overall_exact = (df['true_num'] == df['pred_num']).mean() * 100
-    overall_w1 = (abs(df['true_num'] - df['pred_num']) <= 1).mean() * 100
-    overall_w2 = (abs(df['true_num'] - df['pred_num']) <= 2).mean() * 100
+    report.append("### 3. Error Distance Analysis\n\n")
+    report.append(f"- Adjacent grade errors (off by 1): {adjacent_errors} ({adjacent_errors/(adjacent_errors+distant_errors)*100:.1f}%)\n")
+    report.append(f"- Distant errors (off by 2+): {distant_errors} ({distant_errors/(adjacent_errors+distant_errors)*100:.1f}%)\n\n")
     
-    report = f"""# Confusion Analysis Report
-
-## Overall Metrics
-
-| Metric | Value |
-|--------|-------|
-| **Exact Match** | **{overall_exact:.1f}%** |
-| Within 1 Grade | {overall_w1:.1f}% |
-| Within 2 Grades | {overall_w2:.1f}% |
-| Total Samples | {len(df)} |
-
-## Target: 60%+ Exact Match
-
-Current gap: **{max(0, 60 - overall_exact):.1f}%** improvement needed
-
-## Per-Grade Accuracy
-
-| Grade | Exact Match | Within 1 | Within 2 | Top Confusion |
-|-------|-------------|----------|----------|---------------|
-"""
+    if distant_errors > adjacent_errors * 0.3:
+        report.append("**Warning**: High rate of distant errors suggests feature quality issues.\n")
+    else:
+        report.append("**Good**: Most errors are adjacent grades, suggesting reasonable feature quality.\n")
     
-    for _, row in per_grade.iterrows():
-        report += f"| {row['grade']} | {row['exact_pct']:.1f}% | {row['within_1_pct']:.1f}% | {row['within_2_pct']:.1f}% | {row['top_confusion']} ({row['top_confusion_count']}) |\n"
+    # Save report
+    with open(f"{output_dir}/confusion_report.md", 'w') as f:
+        f.writelines(report)
     
-    report += """
-## Most Confused Grade Pairs
-
-| Pair | Total Errors | Direction |
-|------|--------------|-----------|
-"""
+    print(f"\nSaved analysis to {output_dir}/:")
+    print("  - confusion_matrix.csv")
+    print("  - per_grade_accuracy.csv")
+    print("  - confusion_pairs.csv")
+    print("  - confusion_report.md")
     
-    for pair in confusion_pairs[:10]:
-        report += f"| {pair['pair'][0]} ↔ {pair['pair'][1]} | {pair['total_errors']} | {pair['direction']} |\n"
-    
-    report += """
-## Data Collection Recommendations
+    # Print summary
+    print("\n" + "=" * 50)
+    print("QUICK SUMMARY")
+    print("=" * 50)
+    print(f"\nOverall Accuracy: {correct/total*100:.1f}%")
+    print("\nWorst Grades:")
+    for _, row in worst_grades.iterrows():
+        print(f"  {row['grade']}: {row['accuracy']:.1f}%")
+    print("\nTop Confusion Pairs:")
+    for _, row in top_pairs.iterrows():
+        print(f"  {row['true_grade']} -> {row['pred_grade']}: {row['count']} errors")
 
-"""
-    
-    for i, rec in enumerate(recommendations, 1):
-        report += f"{i}. {rec}\n"
-    
-    report += """
-## Visualizations
-
-- `confusion_matrix.png` - Heatmap of grade confusions
-- `accuracy_by_grade.png` - Bar chart of per-grade accuracy
-
-## Action Items
-
-1. **Immediate**: Focus data collection on confusion pairs (6↔7, 7↔8, 8↔9, 9↔10)
-2. **High-value**: Prioritize PSA 9/10 distinction (highest collector impact)
-3. **Low-hanging fruit**: Add more samples for grades with <50% accuracy
-4. **Quality**: Remove/relabel suspicious samples in confusion hotspots
-"""
-    
-    with open(output_path, 'w') as f:
-        f.write(report)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Confusion analysis for targeted collection")
-    parser.add_argument("--predictions", required=True, help="Predictions CSV path")
-    parser.add_argument("--output", default="analysis", help="Output directory")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Analyze model confusion")
+    parser.add_argument("--predictions", type=str, default="models/full_pipeline_predictions.csv",
+                       help="CSV with true_label and pred_label columns")
+    parser.add_argument("--output", type=str, default="analysis/confusion", help="Output directory")
     
     args = parser.parse_args()
     
-    output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    print("Loading predictions...")
-    df = load_predictions(args.predictions)
-    print(f"  Loaded {len(df)} predictions")
-    
-    print("Computing confusion matrix...")
-    conf_matrix = compute_confusion_matrix(df)
-    
-    print("Identifying confusion pairs...")
-    confusion_pairs = identify_confusion_pairs(conf_matrix)
-    
-    print("Computing per-grade accuracy...")
-    per_grade = compute_per_grade_accuracy(df)
-    
-    print("Generating recommendations...")
-    recommendations = generate_collection_recommendations(per_grade, confusion_pairs)
-    
-    print("Generating visualizations...")
-    plot_confusion_matrix(conf_matrix, str(output_dir / "confusion_matrix.png"))
-    plot_accuracy_by_grade(per_grade, str(output_dir / "accuracy_by_grade.png"))
-    
-    print("Generating report...")
-    generate_report(
-        df, conf_matrix, per_grade, confusion_pairs, recommendations,
-        str(output_dir / "confusion_report.md")
-    )
-    
-    # Save data
-    conf_matrix.to_csv(output_dir / "confusion_matrix.csv")
-    per_grade.to_csv(output_dir / "per_grade_accuracy.csv", index=False)
-    
-    print(f"\nAnalysis complete! Results saved to: {output_dir}/")
-    print("\nTop Recommendations:")
-    for rec in recommendations[:5]:
-        print(f"  • {rec}")
-
-
-if __name__ == "__main__":
-    main()
+    if os.path.exists(args.predictions):
+        analyze_confusion(args.predictions, args.output)
+    else:
+        print(f"Predictions file not found: {args.predictions}")
+        print("Run training first to generate predictions.")

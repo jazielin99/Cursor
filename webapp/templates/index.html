@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>PSA Card Grader</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-600: #4b5563;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--gray-900);
+        }
+        
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        header {
+            text-align: center;
+            padding: 20px 0;
+            color: white;
+        }
+        
+        header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        
+        .upload-area {
+            border: 3px dashed var(--gray-300);
+            border-radius: 16px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: var(--gray-50);
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary);
+            background: #eff6ff;
+        }
+        
+        .upload-area.has-image {
+            padding: 10px;
+            border-style: solid;
+            border-color: var(--success);
+        }
+        
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .upload-text {
+            color: var(--gray-600);
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+        
+        .upload-hint {
+            color: var(--gray-300);
+            font-size: 12px;
+        }
+        
+        #preview {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 12px;
+            display: none;
+        }
+        
+        #preview.visible {
+            display: block;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 16px 24px;
+            font-size: 18px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+        }
+        
+        .btn-primary:disabled {
+            background: var(--gray-300);
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: var(--gray-100);
+            color: var(--gray-800);
+            margin-top: 12px;
+        }
+        
+        .result-card {
+            display: none;
+        }
+        
+        .result-card.visible {
+            display: block;
+        }
+        
+        .grade-display {
+            text-align: center;
+            padding: 30px 0;
+        }
+        
+        .grade-badge {
+            display: inline-block;
+            font-size: 64px;
+            font-weight: 800;
+            color: var(--primary);
+            line-height: 1;
+        }
+        
+        .grade-name {
+            font-size: 24px;
+            color: var(--gray-600);
+            margin-top: 8px;
+        }
+        
+        .confidence-bar {
+            margin: 20px 0;
+        }
+        
+        .confidence-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--gray-600);
+        }
+        
+        .confidence-track {
+            height: 8px;
+            background: var(--gray-200);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--warning), var(--success));
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+        
+        .probabilities {
+            margin-top: 20px;
+        }
+        
+        .prob-title {
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--gray-800);
+        }
+        
+        .prob-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+        }
+        
+        .prob-item {
+            text-align: center;
+            padding: 8px 4px;
+            background: var(--gray-50);
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        
+        .prob-grade {
+            font-weight: 600;
+            color: var(--gray-800);
+        }
+        
+        .prob-value {
+            color: var(--gray-600);
+            margin-top: 2px;
+        }
+        
+        .prob-item.highlight {
+            background: #dbeafe;
+            border: 2px solid var(--primary);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .loading.visible {
+            display: block;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--gray-200);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+            display: none;
+        }
+        
+        .error-message.visible {
+            display: block;
+        }
+        
+        .camera-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        
+        .camera-buttons .btn {
+            flex: 1;
+            padding: 12px;
+            font-size: 14px;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: rgba(255,255,255,0.7);
+            font-size: 12px;
+        }
+        
+        /* Grade color coding */
+        .grade-1 { color: #dc2626; }
+        .grade-2 { color: #ea580c; }
+        .grade-3 { color: #d97706; }
+        .grade-4 { color: #ca8a04; }
+        .grade-5 { color: #65a30d; }
+        .grade-6 { color: #16a34a; }
+        .grade-7 { color: #059669; }
+        .grade-8 { color: #0891b2; }
+        .grade-9 { color: #2563eb; }
+        .grade-10 { color: #7c3aed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>PSA Card Grader</h1>
+            <p>AI-powered card grading predictions</p>
+        </header>
+        
+        <div class="card">
+            <div class="upload-area" id="uploadArea">
+                <div id="uploadPrompt">
+                    <div class="upload-icon">📸</div>
+                    <div class="upload-text">Tap to take photo or upload</div>
+                    <div class="upload-hint">Supports JPG, PNG, WebP</div>
+                </div>
+                <img id="preview" alt="Card preview">
+            </div>
+            
+            <input type="file" id="fileInput" accept="image/*">
+            <input type="file" id="cameraInput" accept="image/*" capture="environment">
+            
+            <div class="camera-buttons">
+                <button class="btn btn-secondary" id="cameraBtn">
+                    📷 Camera
+                </button>
+                <button class="btn btn-secondary" id="galleryBtn">
+                    🖼️ Gallery
+                </button>
+            </div>
+            
+            <button class="btn btn-primary" id="predictBtn" disabled>
+                <span>🔍</span> Analyze Card
+            </button>
+            
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+        
+        <div class="card loading" id="loadingCard">
+            <div class="spinner"></div>
+            <div>Analyzing your card...</div>
+            <div style="font-size: 12px; color: var(--gray-600); margin-top: 8px;">
+                This may take a few seconds
+            </div>
+        </div>
+        
+        <div class="card result-card" id="resultCard">
+            <div class="grade-display">
+                <div class="grade-badge" id="gradeValue">--</div>
+                <div class="grade-name" id="gradeName">--</div>
+            </div>
+            
+            <div class="confidence-bar">
+                <div class="confidence-label">
+                    <span>Confidence</span>
+                    <span id="confidenceValue">--%</span>
+                </div>
+                <div class="confidence-track">
+                    <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="probabilities">
+                <div class="prob-title">All Grade Probabilities</div>
+                <div class="prob-grid" id="probGrid"></div>
+            </div>
+            
+            <button class="btn btn-secondary" id="newScanBtn">
+                📸 Scan Another Card
+            </button>
+        </div>
+        
+        <footer>
+            PSA Card Grader v1.0<br>
+            Model Accuracy: 53.8% exact match
+        </footer>
+    </div>
+    
+    <script>
+        const gradeNames = {
+            'PSA_1': 'Poor', 'PSA_2': 'Good', 'PSA_3': 'Very Good',
+            'PSA_4': 'VG-EX', 'PSA_5': 'Excellent', 'PSA_6': 'EX-MT',
+            'PSA_7': 'Near Mint', 'PSA_8': 'NM-MT', 'PSA_9': 'Mint',
+            'PSA_10': 'Gem Mint'
+        };
+        
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const cameraInput = document.getElementById('cameraInput');
+        const preview = document.getElementById('preview');
+        const uploadPrompt = document.getElementById('uploadPrompt');
+        const predictBtn = document.getElementById('predictBtn');
+        const loadingCard = document.getElementById('loadingCard');
+        const resultCard = document.getElementById('resultCard');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        let selectedFile = null;
+        
+        // Camera button
+        document.getElementById('cameraBtn').addEventListener('click', () => {
+            cameraInput.click();
+        });
+        
+        // Gallery button
+        document.getElementById('galleryBtn').addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        // Upload area click
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        // File inputs
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) handleFile(e.target.files[0]);
+        });
+        
+        cameraInput.addEventListener('change', (e) => {
+            if (e.target.files.length) handleFile(e.target.files[0]);
+        });
+        
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showError('Please select an image file');
+                return;
+            }
+            
+            selectedFile = file;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                preview.src = e.target.result;
+                preview.classList.add('visible');
+                uploadPrompt.classList.add('hidden');
+                uploadArea.classList.add('has-image');
+                predictBtn.disabled = false;
+                hideError();
+                resultCard.classList.remove('visible');
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        // Predict button
+        predictBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            predictBtn.disabled = true;
+            loadingCard.classList.add('visible');
+            resultCard.classList.remove('visible');
+            hideError();
+            
+            const formData = new FormData();
+            formData.append('image', selectedFile);
+            
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                loadingCard.classList.remove('visible');
+                
+                if (result.error && !result.predicted_grade) {
+                    showError(result.error);
+                    predictBtn.disabled = false;
+                    return;
+                }
+                
+                displayResult(result);
+                
+            } catch (err) {
+                loadingCard.classList.remove('visible');
+                showError('Failed to analyze image. Please try again.');
+                predictBtn.disabled = false;
+            }
+        });
+        
+        function displayResult(result) {
+            const grade = result.predicted_grade || 'Unknown';
+            const gradeNum = grade.replace('PSA_', '');
+            const confidence = result.confidence || 0;
+            
+            document.getElementById('gradeValue').textContent = gradeNum;
+            document.getElementById('gradeValue').className = `grade-badge grade-${gradeNum}`;
+            document.getElementById('gradeName').textContent = gradeNames[grade] || grade;
+            
+            document.getElementById('confidenceValue').textContent = `${Math.round(confidence * 100)}%`;
+            document.getElementById('confidenceFill').style.width = `${confidence * 100}%`;
+            
+            // Probabilities grid
+            const probGrid = document.getElementById('probGrid');
+            probGrid.innerHTML = '';
+            
+            const probs = result.probabilities || result.grade_probs || {};
+            const grades = ['PSA_1', 'PSA_2', 'PSA_3', 'PSA_4', 'PSA_5',
+                          'PSA_6', 'PSA_7', 'PSA_8', 'PSA_9', 'PSA_10'];
+            
+            grades.forEach(g => {
+                const prob = probs[g] || 0;
+                const div = document.createElement('div');
+                div.className = `prob-item${g === grade ? ' highlight' : ''}`;
+                div.innerHTML = `
+                    <div class="prob-grade">${g.replace('PSA_', '')}</div>
+                    <div class="prob-value">${Math.round(prob * 100)}%</div>
+                `;
+                probGrid.appendChild(div);
+            });
+            
+            resultCard.classList.add('visible');
+            predictBtn.disabled = false;
+        }
+        
+        // New scan button
+        document.getElementById('newScanBtn').addEventListener('click', () => {
+            selectedFile = null;
+            preview.classList.remove('visible');
+            preview.src = '';
+            uploadPrompt.classList.remove('hidden');
+            uploadArea.classList.remove('has-image');
+            predictBtn.disabled = true;
+            resultCard.classList.remove('visible');
+            fileInput.value = '';
+            cameraInput.value = '';
+        });
+        
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            errorMessage.classList.add('visible');
+        }
+        
+        function hideError() {
+            errorMessage.classList.remove('visible');
+        }
+    </script>
+</body>
+</html>
