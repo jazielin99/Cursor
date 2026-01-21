@@ -29,10 +29,19 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def run_prediction(image_path):
-    """Run Python-based prediction on image"""
+    """Run Python-based prediction on image using tiered model"""
     try:
-        from predictor import predict_grade, GRADE_ORDER
-        result = predict_grade(str(image_path))
+        # Try tiered model first (better accuracy)
+        from tiered_predictor import predict_grade_tiered, get_tiered_model_path, GRADE_ORDER
+        
+        tiered_model_exists = get_tiered_model_path().exists()
+        
+        if tiered_model_exists:
+            result = predict_grade_tiered(str(image_path))
+        else:
+            # Fall back to simple model
+            from predictor import predict_grade
+            result = predict_grade(str(image_path))
         
         # Ensure all values are JSON serializable
         clean_result = {
