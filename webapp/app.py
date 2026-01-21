@@ -29,19 +29,10 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def run_prediction(image_path):
-    """Run Python-based prediction on image using tiered model"""
+    """Run Python-based prediction on image with hierarchical filtering"""
     try:
-        # Try tiered model first (better accuracy)
-        from tiered_predictor import predict_grade_tiered, get_tiered_model_path, GRADE_ORDER
-        
-        tiered_model_exists = get_tiered_model_path().exists()
-        
-        if tiered_model_exists:
-            result = predict_grade_tiered(str(image_path))
-        else:
-            # Fall back to simple model
-            from predictor import predict_grade
-            result = predict_grade(str(image_path))
+        from predictor import predict_grade, GRADE_ORDER, GRADE_NAMES
+        result = predict_grade(str(image_path))
         
         # Ensure all values are JSON serializable
         clean_result = {
@@ -49,7 +40,12 @@ def run_prediction(image_path):
             'confidence': float(result.get('confidence', 0.0)),
             'probabilities': {},
             'method': str(result.get('method', 'unknown')),
-            'grade_name': str(result.get('grade_name', 'Unknown'))
+            'grade_name': GRADE_NAMES.get(result.get('predicted_grade', ''), 'Unknown'),
+            'tier': str(result.get('tier', '')),
+            'tier_reason': str(result.get('tier_reason', '')),
+            'explanation': str(result.get('explanation', '')),
+            'issues': result.get('issues', []),
+            'positives': result.get('positives', [])
         }
         
         # Clean up probabilities
@@ -126,6 +122,102 @@ def grades_info():
             {"grade": "PSA 10", "name": "Gem Mint", "description": "Virtually perfect, pristine"},
         ]
     })
+
+@app.route('/predict_batch', methods=['POST'])
+def predict_batch():
+    """Handle batch image uploads"""
+    if 'images' not in request.files:
+        return jsonify({"error": "No images provided"}), 400
+    
+    files = request.files.getlist('images')
+    if not files or files[0].filename == '':
+        return jsonify({"error": "No images selected"}), 400
+    
+    results = []
+    for file in files:
+        if not allowed_file(file.filename):
+            results.append({"filename": file.filename, "error": "Invalid file type"})
+            continue
+        
+        # Save uploaded file
+        filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+        filepath = app.config['UPLOAD_FOLDER'] / filename
+        file.save(filepath)
+        
+        # Run prediction
+        result = run_prediction(str(filepath))
+        result['filename'] = file.filename
+        result['image_id'] = filename
+        results.append(result)
+    
+    return jsonify({"results": results, "count": len(results)})
+
+# Feedback storage for reinforcement learning
+FEEDBACK_FILE = Path(__file__).parent / 'feedback_data.json'
+
+@app.route('/feedback', methods=['POST'])
+def submit_feedback():
+    """Submit feedback on a prediction for reinforcement learning"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    required = ['image_id', 'predicted_grade', 'correct_grade']
+    for field in required:
+        if field not in data:
+            return jsonify({"error": f"Missing field: {field}"}), 400
+    
+    feedback_entry = {
+        'timestamp': str(Path(__file__).stat().st_mtime),
+        'image_id': data['image_id'],
+        'predicted_grade': data['predicted_grade'],
+        'correct_grade': data['correct_grade'],
+        'confidence': data.get('confidence', 0),
+        'was_correct': data['predicted_grade'] == data['correct_grade']
+    }
+    
+    # Load existing feedback
+    feedback_list = []
+    if FEEDBACK_FILE.exists():
+        try:
+            with open(FEEDBACK_FILE, 'r') as f:
+                feedback_list = json.load(f)
+        except:
+            feedback_list = []
+    
+    feedback_list.append(feedback_entry)
+    
+    # Save feedback
+    with open(FEEDBACK_FILE, 'w') as f:
+        json.dump(feedback_list, f, indent=2)
+    
+    return jsonify({
+        "status": "ok", 
+        "message": "Feedback recorded for model improvement",
+        "total_feedback": len(feedback_list)
+    })
+
+@app.route('/feedback/stats', methods=['GET'])
+def feedback_stats():
+    """Get feedback statistics"""
+    if not FEEDBACK_FILE.exists():
+        return jsonify({"total": 0, "correct": 0, "accuracy": 0})
+    
+    try:
+        with open(FEEDBACK_FILE, 'r') as f:
+            feedback_list = json.load(f)
+        
+        total = len(feedback_list)
+        correct = sum(1 for f in feedback_list if f.get('was_correct'))
+        
+        return jsonify({
+            "total": total,
+            "correct": correct,
+            "accuracy": correct / total if total > 0 else 0
+        })
+    except:
+        return jsonify({"total": 0, "correct": 0, "accuracy": 0})
 
 if __name__ == '__main__':
     # Run on all interfaces for mobile access

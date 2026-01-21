@@ -382,14 +382,53 @@
                 </div>
             </div>
             
+            <div class="explanation-box" id="explanationBox" style="background: var(--gray-50); padding: 12px; border-radius: 8px; margin: 16px 0; font-size: 14px;">
+                <div style="font-weight: 600; margin-bottom: 8px;">Analysis</div>
+                <div id="tierInfo" style="color: var(--gray-600); margin-bottom: 8px;"></div>
+                <div id="issuesList" style="color: #dc2626;"></div>
+                <div id="positivesList" style="color: #16a34a;"></div>
+            </div>
+            
             <div class="probabilities">
-                <div class="prob-title">All Grade Probabilities</div>
+                <div class="prob-title">Grade Probabilities</div>
                 <div class="prob-grid" id="probGrid"></div>
             </div>
             
-            <button class="btn btn-secondary" id="newScanBtn">
+            <div class="feedback-section" style="margin-top: 16px; padding: 12px; background: #eff6ff; border-radius: 8px;">
+                <div style="font-weight: 600; margin-bottom: 8px;">Was this correct?</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" style="flex: 1; padding: 8px;" onclick="submitFeedback(true)">✓ Yes</button>
+                    <select id="correctGrade" style="flex: 2; padding: 8px; border-radius: 8px; border: 1px solid var(--gray-300);">
+                        <option value="">Select correct grade...</option>
+                        <option value="PSA_1">PSA 1</option>
+                        <option value="PSA_2">PSA 2</option>
+                        <option value="PSA_3">PSA 3</option>
+                        <option value="PSA_4">PSA 4</option>
+                        <option value="PSA_5">PSA 5</option>
+                        <option value="PSA_6">PSA 6</option>
+                        <option value="PSA_7">PSA 7</option>
+                        <option value="PSA_8">PSA 8</option>
+                        <option value="PSA_9">PSA 9</option>
+                        <option value="PSA_10">PSA 10</option>
+                    </select>
+                    <button class="btn btn-secondary" style="flex: 1; padding: 8px;" onclick="submitFeedback(false)">Submit</button>
+                </div>
+                <div id="feedbackStatus" style="margin-top: 8px; font-size: 12px; color: var(--gray-600);"></div>
+            </div>
+            
+            <button class="btn btn-secondary" id="newScanBtn" style="margin-top: 12px;">
                 📸 Scan Another Card
             </button>
+        </div>
+        
+        <!-- Batch Upload Section -->
+        <div class="card" style="margin-top: 20px;">
+            <div style="font-weight: 600; margin-bottom: 12px;">📦 Batch Upload</div>
+            <input type="file" id="batchInput" accept="image/*" multiple style="display: none;">
+            <button class="btn btn-secondary" onclick="document.getElementById('batchInput').click()">
+                Select Multiple Images
+            </button>
+            <div id="batchResults" style="margin-top: 12px;"></div>
         </div>
         
         <footer>
@@ -518,40 +557,134 @@
             }
         });
         
+        let currentResult = null;
+        
         function displayResult(result) {
+            currentResult = result;
             const grade = result.predicted_grade || 'Unknown';
             const gradeNum = grade.replace('PSA_', '');
             const confidence = result.confidence || 0;
             
             document.getElementById('gradeValue').textContent = gradeNum;
             document.getElementById('gradeValue').className = `grade-badge grade-${gradeNum}`;
-            document.getElementById('gradeName').textContent = gradeNames[grade] || grade;
+            document.getElementById('gradeName').textContent = result.grade_name || gradeNames[grade] || grade;
             
             document.getElementById('confidenceValue').textContent = `${Math.round(confidence * 100)}%`;
             document.getElementById('confidenceFill').style.width = `${confidence * 100}%`;
             
-            // Probabilities grid
+            // Display explanation
+            const tierInfo = document.getElementById('tierInfo');
+            tierInfo.textContent = result.tier_reason || '';
+            
+            const issuesList = document.getElementById('issuesList');
+            if (result.issues && result.issues.length > 0) {
+                issuesList.innerHTML = '<strong>Issues:</strong> ' + result.issues.join('; ');
+            } else {
+                issuesList.innerHTML = '';
+            }
+            
+            const positivesList = document.getElementById('positivesList');
+            if (result.positives && result.positives.length > 0) {
+                positivesList.innerHTML = '<strong>Strengths:</strong> ' + result.positives.join('; ');
+            } else {
+                positivesList.innerHTML = '';
+            }
+            
+            // Probabilities grid - only show non-zero
             const probGrid = document.getElementById('probGrid');
             probGrid.innerHTML = '';
             
-            const probs = result.probabilities || result.grade_probs || {};
+            const probs = result.probabilities || {};
             const grades = ['PSA_1', 'PSA_2', 'PSA_3', 'PSA_4', 'PSA_5',
                           'PSA_6', 'PSA_7', 'PSA_8', 'PSA_9', 'PSA_10'];
             
             grades.forEach(g => {
                 const prob = probs[g] || 0;
                 const div = document.createElement('div');
+                const isZero = prob < 0.01;
                 div.className = `prob-item${g === grade ? ' highlight' : ''}`;
+                div.style.opacity = isZero ? '0.3' : '1';
                 div.innerHTML = `
                     <div class="prob-grade">${g.replace('PSA_', '')}</div>
-                    <div class="prob-value">${Math.round(prob * 100)}%</div>
+                    <div class="prob-value">${isZero ? '-' : Math.round(prob * 100) + '%'}</div>
                 `;
                 probGrid.appendChild(div);
             });
             
+            // Reset feedback
+            document.getElementById('feedbackStatus').textContent = '';
+            document.getElementById('correctGrade').value = '';
+            
             resultCard.classList.add('visible');
             predictBtn.disabled = false;
         }
+        
+        async function submitFeedback(isCorrect) {
+            if (!currentResult) return;
+            
+            const correctGrade = isCorrect ? currentResult.predicted_grade : document.getElementById('correctGrade').value;
+            if (!correctGrade) {
+                document.getElementById('feedbackStatus').textContent = 'Please select the correct grade';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        image_id: currentResult.image_id,
+                        predicted_grade: currentResult.predicted_grade,
+                        correct_grade: correctGrade,
+                        confidence: currentResult.confidence
+                    })
+                });
+                const data = await response.json();
+                document.getElementById('feedbackStatus').textContent = 
+                    `✓ Feedback saved (${data.total_feedback} total samples)`;
+            } catch (err) {
+                document.getElementById('feedbackStatus').textContent = 'Error saving feedback';
+            }
+        }
+        
+        // Batch upload handler
+        document.getElementById('batchInput').addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (!files.length) return;
+            
+            const batchResults = document.getElementById('batchResults');
+            batchResults.innerHTML = '<div style="text-align: center;">Processing ' + files.length + ' images...</div>';
+            
+            const formData = new FormData();
+            for (let file of files) {
+                formData.append('images', file);
+            }
+            
+            try {
+                const response = await fetch('/predict_batch', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                let html = '<table style="width: 100%; font-size: 12px; border-collapse: collapse;">';
+                html += '<tr style="background: var(--gray-100);"><th style="padding: 8px;">File</th><th>Grade</th><th>Conf</th></tr>';
+                
+                data.results.forEach(r => {
+                    const grade = r.predicted_grade || 'Error';
+                    const conf = r.confidence ? Math.round(r.confidence * 100) + '%' : '-';
+                    html += `<tr style="border-bottom: 1px solid var(--gray-200);">
+                        <td style="padding: 6px;">${r.filename}</td>
+                        <td style="font-weight: 600;">${grade.replace('PSA_', '')}</td>
+                        <td>${conf}</td>
+                    </tr>`;
+                });
+                html += '</table>';
+                batchResults.innerHTML = html;
+            } catch (err) {
+                batchResults.innerHTML = '<div style="color: red;">Error processing batch</div>';
+            }
+        });
         
         // New scan button
         document.getElementById('newScanBtn').addEventListener('click', () => {
