@@ -57,160 +57,225 @@ def load_model():
     return None
 
 
-def heuristic_prediction(features: np.ndarray, feature_names: list) -> dict:
+def analyze_card_condition(features: np.ndarray, feature_names: list) -> dict:
     """
-    Make a prediction using feature-based heuristics when no trained model is available.
-    
-    Uses key features like centering, corner condition, and surface quality to estimate grade.
+    Analyze card condition and return detailed explanations.
     """
-    # Create a feature dictionary for easier access
     feat_dict = {name: val for name, val in zip(feature_names, features)}
     
-    # Start with a base score of 7 (middle of the range)
-    score = 7.0
+    issues = []
+    positives = []
     
     # --- Centering Analysis ---
-    # Art-box centering is very important for high grades
     artbox_overall = feat_dict.get('artbox_overall_score', 0.5)
-    artbox_lr_quality = feat_dict.get('artbox_lr_quality', 0.5)
-    artbox_tb_quality = feat_dict.get('artbox_tb_quality', 0.5)
-    
-    # PSA 10 requires 55/45 centering
+    artbox_lr = feat_dict.get('artbox_lr_ratio', 0.5)
+    artbox_tb = feat_dict.get('artbox_tb_ratio', 0.5)
     passes_lr = feat_dict.get('artbox_passes_psa10_lr', 0)
     passes_tb = feat_dict.get('artbox_passes_psa10_tb', 0)
     
+    lr_pct = int(artbox_lr * 100)
+    tb_pct = int(artbox_tb * 100)
+    centering_str = f"{lr_pct}/{100-lr_pct} L/R, {tb_pct}/{100-tb_pct} T/B"
+    
     if artbox_overall > 0.9 and passes_lr and passes_tb:
-        score += 1.5  # Excellent centering
+        positives.append(f"Excellent centering ({centering_str})")
+        centering_score = 2
     elif artbox_overall > 0.8:
-        score += 0.5  # Good centering
+        positives.append(f"Good centering ({centering_str})")
+        centering_score = 1
     elif artbox_overall < 0.6:
-        score -= 1.5  # Poor centering
+        issues.append(f"Poor centering ({centering_str}) - significant off-center")
+        centering_score = -2
     elif artbox_overall < 0.7:
-        score -= 0.75
+        issues.append(f"Off-center ({centering_str})")
+        centering_score = -1
+    else:
+        centering_score = 0
     
-    # --- Corner Condition ---
-    # Average whitening scores across corners
-    corner_whitening_scores = []
-    for corner in ['tl', 'tr', 'bl', 'br']:
+    # --- Corner Analysis ---
+    corner_issues = []
+    corner_whitening = []
+    for corner, name in [('tl', 'Top-Left'), ('tr', 'Top-Right'), ('bl', 'Bottom-Left'), ('br', 'Bottom-Right')]:
         ws = feat_dict.get(f'adaptive_patch_{corner}_whitening_score', 0)
-        corner_whitening_scores.append(ws)
+        corner_whitening.append(ws)
+        if ws > 0.5:
+            corner_issues.append(f"{name}: severe whitening/wear")
+        elif ws > 0.3:
+            corner_issues.append(f"{name}: visible wear")
     
-    avg_whitening = np.mean(corner_whitening_scores)
-    max_whitening = np.max(corner_whitening_scores)
+    max_whitening = max(corner_whitening)
+    avg_whitening = np.mean(corner_whitening)
     
     if max_whitening > 0.5:
-        score -= 2.0  # Severe corner damage
+        issues.append("Corner damage detected - " + "; ".join(corner_issues))
+        corner_score = -3
     elif max_whitening > 0.3:
-        score -= 1.0  # Noticeable corner wear
+        issues.append("Corner wear visible - " + "; ".join(corner_issues))
+        corner_score = -2
     elif max_whitening > 0.2:
-        score -= 0.5  # Minor corner wear
+        issues.append("Minor corner wear")
+        corner_score = -1
     elif avg_whitening < 0.1:
-        score += 0.5  # Clean corners
+        positives.append("Sharp, clean corners")
+        corner_score = 1
+    else:
+        corner_score = 0
     
-    # --- Edge Quality ---
-    # High resolution corner features
-    edge_densities = []
-    for corner in ['tl', 'tr', 'bl', 'br']:
-        ed = feat_dict.get(f'hires_corner_{corner}_edge_density', 0)
-        edge_densities.append(ed)
+    # --- Surface/Texture Analysis ---
+    texture_grad = feat_dict.get('texture_grad_mean', 0.1)
+    log_energy = feat_dict.get('log_direct_energy', 0.1)
     
-    avg_edge_density = np.mean(edge_densities)
-    if avg_edge_density > 0.15:
-        score -= 0.75  # Rough edges
-    elif avg_edge_density < 0.05:
-        score += 0.25  # Clean edges
+    if texture_grad > 0.2 or log_energy > 0.15:
+        issues.append("Surface damage/scratches detected")
+        surface_score = -2
+    elif texture_grad > 0.15:
+        issues.append("Minor surface wear")
+        surface_score = -1
+    elif texture_grad < 0.06:
+        positives.append("Clean, smooth surface")
+        surface_score = 1
+    else:
+        surface_score = 0
     
-    # --- Surface Quality ---
-    texture_grad_mean = feat_dict.get('texture_grad_mean', 0.1)
-    log_direct_energy = feat_dict.get('log_direct_energy', 0.1)
+    # --- Edge Analysis ---
+    edge_densities = [feat_dict.get(f'hires_corner_{c}_edge_density', 0) for c in ['tl', 'tr', 'bl', 'br']]
+    avg_edge = np.mean(edge_densities)
     
-    # High texture variation can indicate surface issues
-    if texture_grad_mean > 0.15:
-        score -= 0.5
-    elif texture_grad_mean < 0.06:
-        score += 0.25
+    if avg_edge > 0.2:
+        issues.append("Rough/damaged edges")
+        edge_score = -2
+    elif avg_edge > 0.15:
+        issues.append("Minor edge wear")
+        edge_score = -1
+    elif avg_edge < 0.05:
+        positives.append("Clean edges")
+        edge_score = 1
+    else:
+        edge_score = 0
     
-    # --- Color Consistency ---
-    color_gray_std = feat_dict.get('color_gray_std', 0.1)
-    if color_gray_std > 0.25:
-        score -= 0.5  # Uneven color/fading
+    # --- Color/Print Quality ---
+    color_std = feat_dict.get('color_gray_std', 0.1)
+    if color_std > 0.3:
+        issues.append("Color fading or staining")
+        color_score = -1
+    else:
+        color_score = 0
     
-    # --- Border Quality ---
-    border_consistency_range = feat_dict.get('border_consistency_range', 0.1)
-    if border_consistency_range > 0.2:
-        score -= 0.5  # Inconsistent borders
+    # Calculate tier
+    total_score = centering_score + corner_score + surface_score + edge_score + color_score
     
-    # Clamp score to valid range
-    score = max(1.0, min(10.0, score))
+    if total_score >= 3:
+        tier = "NearMint_8_10"
+        tier_reason = "Card shows excellent condition"
+    elif total_score >= 0:
+        tier = "Mid_5_7"
+        tier_reason = "Card shows moderate wear"
+    else:
+        tier = "Low_1_4"
+        tier_reason = "Card shows significant wear/damage"
     
-    # Convert to integer grade with some probability distribution
-    base_grade = int(round(score))
+    return {
+        'issues': issues,
+        'positives': positives,
+        'tier': tier,
+        'tier_reason': tier_reason,
+        'scores': {
+            'centering': centering_score,
+            'corners': corner_score,
+            'surface': surface_score,
+            'edges': edge_score,
+            'color': color_score,
+            'total': total_score
+        }
+    }
+
+
+def hierarchical_prediction(features: np.ndarray, feature_names: list, model=None) -> dict:
+    """
+    Hierarchical prediction that rules out unlikely grades based on condition analysis.
+    """
+    # Analyze condition first
+    analysis = analyze_card_condition(features, feature_names)
+    tier = analysis['tier']
     
-    # Create probability distribution around the predicted grade
-    probs = {}
-    for i, grade in enumerate(GRADE_ORDER):
-        grade_num = i + 1
-        # Gaussian-like distribution centered on predicted grade
-        distance = abs(grade_num - score)
-        prob = np.exp(-distance * distance / 2.0)
-        probs[grade] = prob
+    # Get model probabilities if available
+    if model is not None:
+        clf = model.get('classifier')
+        model_features = model.get('feature_names', feature_names)
+        feat_dict = {name: val for name, val in zip(feature_names, features)}
+        X = np.array([[feat_dict.get(f, 0) for f in model_features]])
+        
+        raw_probs = clf.predict_proba(X)[0]
+        classes = clf.classes_
+        probs = {str(cls): float(p) for cls, p in zip(classes, raw_probs)}
+    else:
+        # Use heuristic
+        probs = {g: 0.1 for g in GRADE_ORDER}
     
-    # Normalize probabilities
+    # Apply hierarchical filtering - zero out impossible grades
+    if tier == "Low_1_4":
+        # Low condition - can't be 8-10
+        for g in ['PSA_8', 'PSA_9', 'PSA_10']:
+            probs[g] = 0.0
+    elif tier == "Mid_5_7":
+        # Mid condition - unlikely to be 1-2 or 10
+        probs['PSA_1'] *= 0.1
+        probs['PSA_2'] *= 0.3
+        probs['PSA_10'] *= 0.2
+    elif tier == "NearMint_8_10":
+        # High condition - can't be 1-4
+        for g in ['PSA_1', 'PSA_2', 'PSA_3', 'PSA_4']:
+            probs[g] = 0.0
+    
+    # Ensure all grades present
+    for g in GRADE_ORDER:
+        if g not in probs:
+            probs[g] = 0.0
+    
+    # Normalize
     total = sum(probs.values())
-    for grade in probs:
-        probs[grade] /= total
+    if total > 0:
+        probs = {g: p/total for g, p in probs.items()}
     
-    # Get predicted grade (highest probability)
     predicted_grade = max(probs, key=probs.get)
     confidence = probs[predicted_grade]
+    
+    # Build explanation
+    explanation_parts = []
+    if analysis['issues']:
+        explanation_parts.append("Issues: " + "; ".join(analysis['issues'][:3]))
+    if analysis['positives']:
+        explanation_parts.append("Strengths: " + "; ".join(analysis['positives'][:3]))
+    
+    explanation = " | ".join(explanation_parts) if explanation_parts else "Standard condition"
     
     return {
         'predicted_grade': predicted_grade,
         'confidence': float(confidence),
         'probabilities': probs,
-        'method': 'heuristic',
-        'raw_score': float(score)
+        'tier': tier,
+        'tier_reason': analysis['tier_reason'],
+        'explanation': explanation,
+        'issues': analysis['issues'],
+        'positives': analysis['positives'],
+        'condition_scores': analysis['scores']
     }
 
 
+def heuristic_prediction(features: np.ndarray, feature_names: list) -> dict:
+    """
+    Make a prediction using feature-based heuristics when no trained model is available.
+    """
+    return hierarchical_prediction(features, feature_names, model=None)
+
+
 def model_prediction(model, features: np.ndarray, feature_names: list) -> dict:
-    """Make prediction using a trained model."""
+    """Make prediction using a trained model with hierarchical filtering."""
     try:
-        # Get the features the model expects
-        model_features = model.get('feature_names', feature_names)
-        
-        # Create feature array in correct order
-        feat_dict = {name: val for name, val in zip(feature_names, features)}
-        X = np.array([[feat_dict.get(f, 0) for f in model_features]])
-        
-        # Get classifier
-        clf = model.get('classifier')
-        if clf is None:
-            return heuristic_prediction(features, feature_names)
-        
-        # Predict
-        probs = clf.predict_proba(X)[0]
-        classes = clf.classes_
-        
-        prob_dict = {}
-        for i, cls in enumerate(classes):
-            # Convert numpy string to Python string
-            prob_dict[str(cls)] = float(probs[i])
-        
-        # Ensure all grades are represented
-        for grade in GRADE_ORDER:
-            if grade not in prob_dict:
-                prob_dict[grade] = 0.0
-        
-        predicted_grade = str(classes[np.argmax(probs)])
-        confidence = float(np.max(probs))
-        
-        return {
-            'predicted_grade': predicted_grade,
-            'confidence': confidence,
-            'probabilities': prob_dict,
-            'method': 'model'
-        }
+        # Use hierarchical prediction which applies tier filtering
+        result = hierarchical_prediction(features, feature_names, model=model)
+        result['method'] = 'model'
+        return result
     except Exception as e:
         return heuristic_prediction(features, feature_names)
 
