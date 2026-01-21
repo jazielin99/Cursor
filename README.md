@@ -300,9 +300,38 @@ python app.py
 
 Features:
 - Camera capture or photo upload
-- Real-time grade predictions
+- Real-time grade predictions with tiered specialist model
 - Confidence scores and probability breakdown
 - Works on iOS, Android, and desktop
+
+### Python Tiered Model
+
+The webapp uses a Python-based tiered specialist model with the following architecture:
+
+| Component | Description |
+|-----------|-------------|
+| **Binary Triage** | Near Mint (8-10) vs Market Grade (1-7) |
+| **Market Router** | Low (1-4) vs Mid (5-7) for market grades |
+| **Low Specialist** | PSA 1-4 - focus on damage/wear features |
+| **Mid Specialist** | PSA 5-7 - focus on centering/moderate wear |
+| **High Specialist** | PSA 8-10 - focus on micro-level features |
+| **PSA 9 vs 10** | Dedicated classifier for high-grade distinction |
+| **Ordinal Smoothing** | Hierarchical penalty for neighbor grades |
+
+To retrain the tiered model with more data:
+
+```bash
+# Train with 200 samples per class (default)
+python webapp/tiered_predictor.py --train --samples 200
+
+# Train with more samples for better accuracy
+python webapp/tiered_predictor.py --train --samples 300
+
+# Test prediction on a single image
+python webapp/tiered_predictor.py --image path/to/card.jpg
+```
+
+The model is saved to `models/psa_tiered_python_model.pkl`
 
 ## iOS App (Native)
 
